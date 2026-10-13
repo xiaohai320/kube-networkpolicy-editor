@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netpol-editor
+  namespace: netpol-editor
+  labels:
+    app: netpol-editor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: netpol-editor
+  template:
+    metadata:
+      labels:
+        app: netpol-editor
+    spec:
+      serviceAccountName: netpol-editor
+      containers:
+        - name: editor
+          image: ghcr.io/xiaohai320/netpol-editor:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true

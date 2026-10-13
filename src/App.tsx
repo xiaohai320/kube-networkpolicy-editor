@@ -6,9 +6,12 @@ import { YamlPanel } from '@/components/yaml/YamlPanel';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { LocaleToggle } from '@/i18n/LocaleToggle';
 import { PolicyPageBar, type PolicyPage } from '@/components/ui/PolicyPageBar';
-import type { EditorState } from '@/state/actions';
+import { ClusterPanel } from '@/components/cluster/ClusterPanel';
+import type { EditorState, ClusterSync } from '@/state/actions';
+import { useTranslation } from '@/i18n';
 import { initialState } from '@/state/reducer';
 import { createDefaultPolicy } from '@/types/policy';
+import { detectAndParse } from '@/lib/yaml-parser';
 import { generateId } from '@/lib/utils';
 
 interface PageData {
@@ -24,6 +27,24 @@ function createPage(label: string): PageData {
   };
 }
 
+/**
+ * Load a cluster policy as a new page: parse + validate first, then append the
+ * page and make it active. The cluster marker rides on the initial state so
+ * the page starts as `unsynced` relative to the cluster.
+ */
+function clusterLoadedPage(yaml: string, label: string): PageData | undefined {
+  const { policy, format } = detectAndParse(yaml);
+  if (!policy) return undefined;
+  return {
+    page: { id: generateId(), label },
+    state: {
+      policy: { ...policy, format },
+      activeSpec: 0,
+      clusterSync: 'unsynced',
+    },
+  };
+}
+
 function App() {
   const [splitPercent, setSplitPercent] = useState(60);
   const [pages, setPages] = useState<PageData[]>(() => [createPage('Policy 1')]);
@@ -36,6 +57,12 @@ function App() {
   const handleStateChange = useCallback(
     (state: EditorState) => {
       stateRef.current[activeId] = state;
+      // Mirror into pages[] immediately, not just on switch: the cluster-sync
+      // badge in the header reads the active page's snapshot, and apply/edit
+      // transitions must be visible without a page round-trip.
+      setPages(prev =>
+        prev.map(p => (p.page.id === activeId ? { ...p, state } : p)),
+      );
     },
     [activeId],
   );
@@ -94,6 +121,23 @@ function App() {
     setPages(prev => prev.map(p => (p.page.id === id ? { ...p, page: { ...p.page, label } } : p)));
   }, []);
 
+  const handleLoadFromCluster = useCallback(
+    (yaml: string, label: string) => {
+      const page = clusterLoadedPage(yaml, label);
+      if (!page) return;
+      setPages(prev => [
+        ...prev.map(p =>
+          p.page.id === activeId && stateRef.current[activeId]
+            ? { ...p, state: stateRef.current[activeId]! }
+            : p,
+        ),
+        page,
+      ]);
+      setActiveId(page.page.id);
+    },
+    [activeId],
+  );
+
   return (
     <div className="flex flex-col h-screen">
       {/* Page tabs */}
@@ -107,10 +151,14 @@ function App() {
           onRename={handleRenamePage}
         />
         <div className="flex items-center gap-1 pr-2">
+          <ClusterSyncBadge sync={activePage.state.clusterSync ?? 'local'} />
           <LocaleToggle />
           <ThemeToggle />
         </div>
       </div>
+
+      {/* Cluster inventory panel (fixed overlay) */}
+      <ClusterPanel onLoadPolicy={handleLoadFromCluster} />
 
       {/* Main content — keyed by active page to force remount */}
       <PolicyProvider
@@ -140,6 +188,20 @@ function App() {
         </div>
       </PolicyProvider>
     </div>
+  );
+}
+
+/** Header badge for the active page's cluster relationship (i18n-titled). */
+function ClusterSyncBadge({ sync }: { sync: ClusterSync }) {
+  const { t } = useTranslation();
+  if (sync === 'local') return null;
+  const cls = sync === 'applied' ? 'text-green-300' : 'text-orange-300';
+  const glyph = sync === 'applied' ? '✓' : '●';
+  const title = sync === 'applied' ? t('cluster-synced') : t('cluster-unsynced');
+  return (
+    <span className={`text-xs px-1.5 ${cls}`} title={title}>
+      {glyph}
+    </span>
   );
 }
 

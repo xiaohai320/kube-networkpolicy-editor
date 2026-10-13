@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: netpol-editor
+  namespace: netpol-editor
+  annotations:
+    # TLS termination at the ingress; the editor is same-origin behind it.
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: netpol-editor.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: netpol-editor
+                port:
+                  number: 80
+  tls:
+    - hosts: [netpol-editor.example.com]
+      secretName: netpol-editor-tls

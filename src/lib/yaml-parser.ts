@@ -1,5 +1,6 @@
 import yaml from 'js-yaml';
 import { en, type Msg } from '@/i18n';
+import { HTTP_METHODS as HTTP_METHODS_LIST } from '@/types/policy';
 import type {
   Direction,
   Endpoint,
@@ -112,6 +113,40 @@ function parsePorts(input?: Array<Record<string, unknown>>): PortRule[] {
     out.push({ port, protocol });
   }
   return out;
+}
+
+const HTTP_METHODS = new Set<string>(HTTP_METHODS_LIST);
+
+/**
+ * Model an L7 http block only when every entry is method+path shaped. `method`
+ * is clamped to the standard verbs (or `*`); anything else — headers, a
+ * non-standard method, extra entries — means the whole block routes to the
+ * unsupported channel, so the model never half-captures an L7 rule.
+ */
+function parseHttpRules(
+  rules: Record<string, unknown> | undefined,
+  port: PortRule,
+): PortRule | typeof UNMODELABLE {
+  const http = rules?.http;
+  const entries = asRecordArray(http);
+  if (http === undefined) return port;
+  if (!entries || entries.length === 0) return port;
+  for (const entry of entries) {
+    const keys = Object.keys(entry);
+    if (!keys.every(k => k === 'method' || k === 'path')) return UNMODELABLE;
+    const method = typeof entry.method === 'string' ? entry.method.toUpperCase() : undefined;
+    if (method && !HTTP_METHODS.has(method)) return UNMODELABLE;
+    if (!method && !entry.path) return UNMODELABLE;
+    // Several http entries under one port group exceed one editable filter,
+    // which the model does not express — keep them verbatim.
+    if (entries.length > 1) return UNMODELABLE;
+    port.http = {
+      ...(method ? { method } : {}),
+      ...(typeof entry.path === 'string' ? { path: entry.path } : {}),
+    };
+    return port;
+  }
+  return port;
 }
 
 /* ------------------------------------------------------------------ */
@@ -252,13 +287,23 @@ interface CiliumPortGroupInput {
 }
 
 /**
- * A toPorts group carrying L7 rules (http/dns/tls contexts) cannot be edited
- * here. Those rules are routed to `unsupported` verbatim rather than parsed,
+ * A toPorts group whose L7 block cannot be modeled (non-http rules, multiple
+ * entries, headers/host, non-standard methods) makes the whole rule
+ * unrepresentable: it is routed to `unsupported` verbatim rather than parsed,
  * so nothing is silently dropped.
  */
-function hasL7Rules(groups?: CiliumPortGroupInput[]): boolean {
-  return (groups ?? []).some(g => g.rules && Object.keys(g.rules).length > 0);
+function hasUnmodelableL7Rules(groups?: CiliumPortGroupInput[]): boolean {
+  return (groups ?? []).some(g => {
+    if (!g.rules || Object.keys(g.rules).length === 0) return false;
+    // L7 blocks other than `http` (dns, kafka, tls…) have no model.
+    if (Object.keys(g.rules).some(k => k !== 'http')) return true;
+    const port = parsePorts(g.ports)[0];
+    return port ? parseHttpRules(g.rules, port) === UNMODELABLE : true;
+  });
 }
+
+/** Marker returned by {@link parseHttpRules} for an unmodelable http block. */
+const UNMODELABLE = { unmodelable: true } as const;
 
 const SERVICE_ENTITY_PREFIX = 'k8s:service:';
 
@@ -515,7 +560,7 @@ function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string)
         bucket.push(rule);
         continue;
       }
-      if (hasL7Rules(asRecordArray(rule.toPorts) as CiliumPortGroupInput[] | undefined)) {
+      if (hasUnmodelableL7Rules(asRecordArray(rule.toPorts) as CiliumPortGroupInput[] | undefined)) {
         bucket.push(rule);
         continue;
       }
@@ -585,7 +630,17 @@ function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string)
 
 function flattenPorts(groups?: CiliumPortGroupInput[]): PortRule[] {
   const out: PortRule[] = [];
-  for (const g of groups ?? []) out.push(...parsePorts(g.ports));
+  for (const g of groups ?? []) {
+    for (const port of parsePorts(g.ports)) {
+      // L7 http filters ride on the port rule; the group has already passed the
+      // unmodelable check, so any http block here is method+path shaped. If the
+      // marker still comes back the group was pushed to unsupported wholesale,
+      // and the bare port is discarded with it.
+      const result = parseHttpRules(g.rules, port);
+      if ('unmodelable' in result) continue;
+      out.push(result);
+    }
+  }
   return out;
 }
 

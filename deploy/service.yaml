@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: netpol-editor
+  namespace: netpol-editor
+spec:
+  selector:
+    app: netpol-editor
+  ports:
+    - port: 80
+      targetPort: 8080

@@ -17,13 +17,16 @@
     "node": ">=18.18"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.4",
     "@tanstack/react-table": "^8.21.3",
+    "hono": "^4.13.13",
     "i18next": "^25.10.10",
     "js-yaml": "^4.1.0",
     "lucide-react": "^0.474.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-i18next": "^15.7.4"
+    "react-i18next": "^15.7.4",
+    "undici": "^8.11.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.4",

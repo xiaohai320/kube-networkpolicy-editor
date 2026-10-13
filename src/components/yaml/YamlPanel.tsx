@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
-import { Copy, Download, Upload, Check } from 'lucide-react';
+import { Copy, Download, Upload, Check, CloudUpload, Loader2 } from 'lucide-react';
 import { usePolicyContext } from '@/state/context';
-import { importPolicy, setFormat } from '@/state/actions';
+import { importPolicy, setFormat, setClusterSync as setClusterSyncAction } from '@/state/actions';
+import { applyClusterPolicy, ClusterApiError } from '@/lib/cluster-api';
 import { generateK8sYaml } from '@/lib/yaml-gen-k8s';
 import { generateCiliumYaml } from '@/lib/yaml-gen-cilium';
 import { detectAndParse, PolicyParseError } from '@/lib/yaml-parser';
@@ -20,6 +21,8 @@ export function YamlPanel() {
   const [activeTab, setActiveTab] = useState<TabId>('k8s');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [applied, setApplied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const yaml = useMemo(() => {
@@ -79,18 +82,46 @@ export function YamlPanel() {
     [dispatch, parseErrorMessage],
   );
 
+  const handleApply = useCallback(async () => {
+    setApplying(true);
+    setError(null);
+    try {
+      const manifest = activeTab === 'k8s' ? generateK8sYaml(state.policy) : generateCiliumYaml(state.policy);
+      await applyClusterPolicy(
+        { kind: activeTab === 'k8s' ? 'NetworkPolicy' : 'CiliumNetworkPolicy', namespace: state.policy.namespace, name: state.policy.name },
+        manifest,
+      );
+      dispatch(setClusterSyncAction('applied'));
+      setApplied(true);
+      setTimeout(() => setApplied(false), 1500);
+    } catch (err) {
+      if (err instanceof ClusterApiError && err.status === 409) {
+        setError(t('cluster-conflict'));
+      } else if (err instanceof ClusterApiError) {
+        setError(err.message);
+      } else {
+        setError(t('cluster-apply-error'));
+      }
+    } finally {
+      setApplying(false);
+    }
+  }, [state.policy, activeTab, dispatch, t]);
+
   const handleYamlEdit = useCallback(
     (editedYaml: string) => {
       try {
         const { policy, format } = detectAndParse(editedYaml);
-        dispatch(importPolicy(policy));
+        // A cluster-originated policy stays cluster-relative even when the
+        // user reshapes it in the YAML editor: it is still 'unsynced', never
+        // downgraded to a locally-created policy.
+        dispatch(importPolicy(policy, state.clusterSync === 'local' ? undefined : 'unsynced'));
         setActiveTab(format);
         setError(null);
       } catch (err) {
         setError(parseErrorMessage(err, 'error-parse-inline'));
       }
     },
-    [dispatch, parseErrorMessage],
+    [dispatch, parseErrorMessage, state.clusterSync],
   );
 
   return (
@@ -126,6 +157,11 @@ export function YamlPanel() {
           />
           <ActionButton icon={<Download size={14} />} label={t('action-download')} onClick={handleDownload} />
           <ActionButton icon={<Upload size={14} />} label={t('action-upload')} onClick={handleUpload} />
+          <ActionButton
+            icon={applying ? <Loader2 size={14} className="animate-spin" /> : applied ? <Check size={14} /> : <CloudUpload size={14} />}
+            label={applying ? t('cluster-applying') : applied ? t('cluster-applied') : t('cluster-apply')}
+            onClick={() => void handleApply()}
+          />
           <input
             ref={fileInputRef}
             type="file"

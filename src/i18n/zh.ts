@@ -234,4 +234,29 @@ export const zh = {
   'rate-3': '良好',
   'rate-4': '强',
   'rating-title': '安全性：{{label}}（{{rating}}/4）',
+
+  // ── Cluster mode ───────────────────────────────────────────────────
+  'cluster-panel-title': '集群策略',
+  'cluster-connect': '连接',
+  'cluster-connected': '已连接',
+  'cluster-api-url': 'API Server 地址',
+  'cluster-token': 'Bearer Token',
+  'cluster-load': '加载策略',
+  'cluster-loading': '加载中…',
+  'cluster-empty': '未找到策略',
+  'cluster-apply': '应用到集群',
+  'cluster-applying': '应用中…',
+  'cluster-applied': '已应用',
+  'cluster-synced': '已同步',
+  'cluster-unsynced': '未同步',
+  'cluster-conflict': '集群侧已变化 —— 请刷新后重试',
+  'cluster-error-401': '未授权 —— Token 无效或已过期',
+  'header-method': '方法',
+  'header-path': '路径',
+  'action-remove': '移除 HTTP 过滤',
+  'cluster-namespace-filter': '命名空间…',
+  'cluster-search': '搜索…',
+  'cluster-load-error': '加载集群策略失败',
+  'cluster-apply-error': '应用到集群失败'
+
 } satisfies Record<keyof typeof en, string>;

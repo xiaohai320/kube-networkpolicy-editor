@@ -16,10 +16,29 @@ export type RuleGroup = 'outside' | 'namespace' | 'cluster';
 
 export type Protocol = 'TCP' | 'UDP' | 'SCTP';
 
+/**
+ * HTTP methods the editor models, shared by the parser (accept list) and the
+ * port editor (dropdown options). `*` is Cilium's "any method".
+ */
+export const HTTP_METHODS = [
+  'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'CONNECT', 'TRACE', '*',
+] as const;
+
+/**
+ * HTTP L7 filter on a port rule. The only L7 layer this editor models; a port
+ * rule without it is a plain L4 rule. Cilium treats `path` as an ECMA regex.
+ */
+export interface HttpL7Rule {
+  method?: string;
+  path?: string;
+}
+
 /** A Cilium port can be numeric, a named port, or a range such as `5000:5100`. */
 export interface PortRule {
   port: number | string;
   protocol: Protocol;
+  /** Optional HTTP L7 filter; implies the port carries `rules.http`. */
+  http?: HttpL7Rule;
 }
 
 export type LabelOperator = 'In' | 'NotIn' | 'Exists' | 'DoesNotExist';

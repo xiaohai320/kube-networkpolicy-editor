@@ -39,7 +39,23 @@ function mapEndpoints(
   return direction === 'ingress' ? { ...spec, ingress: fn(spec.ingress) } : { ...spec, egress: fn(spec.egress) };
 }
 
+const MUTATING: ReadonlySet<PolicyAction['type']> = new Set([
+  'SET_METADATA',
+  'SET_FORMAT',
+  'ADD_SPEC',
+  'REMOVE_SPEC',
+  'SET_ENDPOINT_SELECTOR',
+  'ADD_ENDPOINT',
+  'REMOVE_ENDPOINT',
+  'UPDATE_ENDPOINT',
+  'SET_DEFAULT_DENY',
+]);
+
 export function policyReducer(state: EditorState, action: PolicyAction): EditorState {
+  // An applied policy that gets edited is no longer in sync with the cluster.
+  if (state.clusterSync === 'applied' && MUTATING.has(action.type)) {
+    state = { ...state, clusterSync: 'unsynced' };
+  }
   const specIndex = clampSpecIndex(state.policy, state.activeSpec);
 
   switch (action.type) {
@@ -133,11 +149,16 @@ export function policyReducer(state: EditorState, action: PolicyAction): EditorS
         }),
       };
 
-    case 'IMPORT_POLICY':
-      return { policy: action.payload, activeSpec: 0 };
+    case 'IMPORT_POLICY': {
+      const sync = (action as { clusterSync?: EditorState['clusterSync'] }).clusterSync;
+      return { policy: action.payload, activeSpec: 0, clusterSync: sync ?? 'local' };
+    }
+
+    case 'SET_CLUSTER_SYNC':
+      return { ...state, clusterSync: action.payload.sync };
 
     case 'RESET':
-      return { policy: action.payload?.policy ?? createDefaultPolicy(), activeSpec: 0 };
+      return { policy: action.payload?.policy ?? createDefaultPolicy(), activeSpec: 0, clusterSync: 'local' };
 
     default:
       return state;

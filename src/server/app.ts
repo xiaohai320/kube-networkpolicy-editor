@@ -1,0 +1,116 @@
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { Agent, type Dispatcher } from 'undici';
+
+/**
+ * The backend is deliberately thin (ADR-0001): serve the built SPA and proxy
+ * `/k8s/*` to the kube-apiserver. No business logic — policies never touch
+ * server-side code beyond the byte-for-byte forward.
+ */
+
+export interface ProxyConfig {
+  /** kube-apiserver base URL, e.g. https://10.0.0.1:6443. */
+  apiServer: string;
+  /** Bearer token for the upstream apiserver. */
+  token: string;
+  /** CA bundle content to verify the apiserver cert. `false` disables verification (tests only). */
+  ca?: string | false;
+}
+
+/** Headers worth forwarding in either direction; everything else is dropped. */
+const FORWARDED_HEADERS = ['accept', 'content-type', 'user-agent'];
+
+/**
+ * Build the Hono app. Exposed for tests: pass `ca: false` so stubbed upstream
+ * fetches don't need TLS plumbing.
+ */
+export function createClusterProxyApp(config: ProxyConfig): Hono {
+  const app = new Hono();
+  // One dispatcher for the app lifetime: undici pools connections behind it.
+  const dispatcher: Dispatcher | undefined =
+    typeof config.ca === 'string'
+      ? new Agent({ connect: { ca: config.ca } })
+      : undefined;
+
+  app.all('/k8s/*', async c => {
+    const upstream = new URL(c.req.path.replace(/^\/k8s/, ''), config.apiServer);
+    upstream.search = new URL(c.req.url).search;
+
+    const headers = new Headers();
+    for (const name of FORWARDED_HEADERS) {
+      const v = c.req.header(name);
+      if (v) headers.set(name, v);
+    }
+    headers.set('authorization', `Bearer ${config.token}`);
+
+    const method = c.req.method;
+    const body = method === 'GET' || method === 'HEAD' ? undefined : await c.req.text();
+
+    let upstreamRes: Response;
+    try {
+      upstreamRes = await fetch(upstream.toString(), {
+        method,
+        headers,
+        body,
+        // undefined dispatcher = Node's default; tests stub fetch anyway.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...(dispatcher ? { dispatcher: dispatcher as any } : {}),
+      } as RequestInit);
+    } catch (err) {
+      return c.json(
+        { kind: 'Status', reason: 'ServiceUnavailable', message: String(err) },
+        503,
+      );
+    }
+
+    // Byte-for-byte passthrough: status, allowed headers, body. RBAC (403) and
+    // conflict (409) semantics come from the apiserver itself — the proxy adds
+    // nothing, which is the point of ADR-0001.
+    const resHeaders = new Headers();
+    for (const name of ['content-type', 'cache-control']) {
+      const v = upstreamRes.headers.get(name);
+      if (v) resHeaders.set(name, v);
+    }
+    const resBody = await upstreamRes.arrayBuffer();
+    return new Response(resBody, { status: upstreamRes.status, headers: resHeaders });
+  });
+
+  return app;
+}
+
+/** Mount static assets for the production single-image deployment. */
+export function withStatic(app: Hono, distDir: string): Hono {
+  app.get('*', async c => {
+    const path = c.req.path;
+    if (path.startsWith('/k8s/')) return c.notFound();
+    const file = path === '/' ? '/index.html' : path;
+    try {
+      const content = await readFile(join(distDir, file));
+      const types: Record<string, string> = {
+        '.html': 'text/html',
+        '.js': 'text/javascript',
+        '.css': 'text/css',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.ico': 'image/x-icon',
+      };
+      const ext = file.slice(file.lastIndexOf('.'));
+      return new Response(content, {
+        headers: { 'content-type': types[ext] ?? 'application/octet-stream' },
+      });
+    } catch {
+      // SPA fallback: unknown paths get the shell so client routing works.
+      const index = await readFile(join(distDir, 'index.html'));
+      return new Response(index, { headers: { 'content-type': 'text/html' } });
+    }
+  });
+  return app;
+}
+
+/** Entry point used by the Docker image; not exercised in tests. */
+export function startServer(config: ProxyConfig, distDir: string, port: number): void {
+  const app = withStatic(createClusterProxyApp(config), distDir);
+  serve({ fetch: app.fetch, port });
+}

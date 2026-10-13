@@ -9,7 +9,57 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(process.env.APP_VERSION ?? 'dev'),
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    {
+      // Dev-mode cluster access (ADR-0001): the browser talks to same-origin
+      // /k8s/* and this middleware forwards to the apiserver. Target and token
+      // ride on request headers set by the UI (x-k8s-target / x-k8s-token,
+      // fed from sessionStorage), so re-pasting credentials needs no restart.
+      // The forwarding headers are stripped before the request leaves.
+      name: 'k8s-dev-proxy',
+      configureServer(server) {
+        server.middlewares.use('/k8s', (req, res) => {
+          const target = req.headers['x-k8s-target'];
+          const token = req.headers['x-k8s-token'];
+          if (typeof target !== 'string' || typeof token !== 'string') {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ message: 'Missing x-k8s-target/x-k8s-token headers' }));
+            return;
+          }
+          delete req.headers['x-k8s-target'];
+          delete req.headers['x-k8s-token'];
+          const upstream = new URL(req.url ?? '/', target);
+          const chunks: Buffer[] = [];
+          req.on('data', (c: Buffer) => chunks.push(c));
+          req.on('end', async () => {
+            try {
+              const upRes = await fetch(upstream, {
+                method: req.method,
+                headers: new Headers(
+                  Object.fromEntries(
+                    Object.entries({ ...req.headers, authorization: `Bearer ${token}` }).filter(
+                      (pair): pair is [string, string] => typeof pair[1] === 'string',
+                    ),
+                  ),
+                ),
+                body: ['GET', 'HEAD'].includes(req.method ?? '') ? undefined : Buffer.concat(chunks),
+              });
+              res.statusCode = upRes.status;
+              for (const [k, v] of upRes.headers) {
+                if (!['content-encoding', 'transfer-encoding', 'connection'].includes(k)) res.setHeader(k, v);
+              }
+              res.end(Buffer.from(await upRes.arrayBuffer()));
+            } catch (err) {
+              res.statusCode = 502;
+              res.end(JSON.stringify({ message: String(err) }));
+            }
+          });
+        });
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

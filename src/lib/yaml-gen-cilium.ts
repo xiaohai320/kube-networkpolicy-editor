@@ -27,9 +27,38 @@ const ENTITY_FOR_ALL: Record<'outside' | 'cluster', string> = {
   cluster: ENTITY_ENTITY.cluster,
 };
 
-function portGroups(ports: PortRule[]): CiliumRule | undefined {
+/**
+ * Build the toPorts *list*. A port carrying an http filter forms its own
+ * toPorts entry (Cilium scopes `rules` to the whole group, so merging it with
+ * plain ports would widen the filter); consecutive filterless ports share one
+ * entry, the way hand-written policies spell them.
+ */
+function portGroups(ports: PortRule[]): CiliumRule[] | undefined {
   if (ports.length === 0) return undefined;
-  return { ports: ports.map(p => ({ port: String(p.port), protocol: p.protocol })) };
+  const entries: CiliumRule[] = [];
+  let plain: CiliumRule[] = [];
+  const flushPlain = () => {
+    if (plain.length > 0) {
+      entries.push({ ports: plain });
+      plain = [];
+    }
+  };
+  for (const port of ports) {
+    if (port.http) {
+      flushPlain();
+      const http: Record<string, unknown> = {};
+      if (port.http.method) http.method = port.http.method;
+      if (port.http.path) http.path = port.http.path;
+      entries.push({
+        ports: [{ port: String(port.port), protocol: port.protocol }],
+        rules: { http: [http] },
+      });
+    } else {
+      plain.push({ port: String(port.port), protocol: port.protocol });
+    }
+  }
+  flushPlain();
+  return entries;
 }
 
 /**
@@ -155,7 +184,7 @@ function buildRule(
   }
 
   const toPorts = portGroups(endpoint.ports);
-  if (toPorts) rule.toPorts = [toPorts];
+  if (toPorts) rule.toPorts = toPorts;
 
   return rule;
 }

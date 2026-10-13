@@ -236,4 +236,29 @@ export const en = {
   'rate-3': 'Good',
   'rate-4': 'Strong',
   'rating-title': 'Security: {{label}} ({{rating}}/4)',
+
+  // ── Cluster mode ───────────────────────────────────────────────────
+  'cluster-panel-title': 'Cluster policies',
+  'cluster-connect': 'Connect',
+  'cluster-connected': 'Connected',
+  'cluster-api-url': 'API server URL',
+  'cluster-token': 'Bearer token',
+  'cluster-load': 'Load policies',
+  'cluster-loading': 'Loading…',
+  'cluster-empty': 'No policies found',
+  'cluster-apply': 'Apply to cluster',
+  'cluster-applying': 'Applying…',
+  'cluster-applied': 'Applied',
+  'cluster-synced': 'Synced',
+  'cluster-unsynced': 'Unsynced',
+  'cluster-conflict': 'Cluster state changed — refresh and retry',
+  'cluster-error-401': 'Unauthorized — token invalid or expired',
+  'header-method': 'Method',
+  'header-path': 'Path',
+  'action-remove': 'Remove HTTP filter',
+  'cluster-namespace-filter': 'Namespace…',
+  'cluster-search': 'Search…',
+  'cluster-load-error': 'Failed to load cluster policies',
+  'cluster-apply-error': 'Failed to apply to cluster'
+
 } as const;

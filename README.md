@@ -1,6 +1,8 @@
 # Network Policy Editor
 
-A browser-based visual editor for Kubernetes `NetworkPolicy` and Cilium `CiliumNetworkPolicy`. Build and visualize policies on a canvas, then export either format as YAML — or paste YAML in and edit it visually. No backend, everything runs in the browser.
+A browser-based visual editor for Kubernetes `NetworkPolicy` and Cilium `CiliumNetworkPolicy`. Build and visualize policies on a canvas, then export either format as YAML — or paste YAML in and edit it visually.
+
+Runs standalone in the browser, or deploy it into your cluster to read and edit the policies that are already there (see [Cluster mode](#cluster-mode)).
 
 Inspired by [editor.networkpolicy.io](https://editor.networkpolicy.io/). Built as a fork of [kpod](https://github.com/Blackout-Industries/kpod) — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
@@ -19,6 +21,27 @@ npm run typecheck  # tsc -b --noEmit
 ```
 
 Requires Node 18.18+, per `package.json` `engines`. Vite 6 itself accepts 18, 20 and 22+.
+
+## Cluster mode
+
+Deployed in-cluster, the editor lists the cluster's NetworkPolicies and
+CiliumNetworkPolicies in a side panel, loads one into a page on click, and
+writes edited policies back with server-side apply (conflicts surface as 409
+with a refresh prompt — nothing is overwritten silently).
+
+```bash
+kubectl create namespace netpol-editor
+kubectl apply -f deploy/
+```
+
+The in-cluster deployment uses the pod's ServiceAccount; RBAC is defined in
+`deploy/clusterrole.yaml` (list/get/patch on both policy kinds cluster-wide —
+or use the namespaced variant in `deploy/namespaced.md`).
+
+Local development connects to any cluster from the dev server: open the
+cluster panel (cloud icon, top-left), paste your API server URL and a bearer
+token — they live in sessionStorage only, never on disk. The dev server
+forwards `/k8s/*` requests so CORS never applies.
 
 ## Tech Stack
 
