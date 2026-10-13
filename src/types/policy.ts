@@ -1,3 +1,5 @@
+import { generateId } from '@/lib/utils';
+
 /** Traffic direction of a rule list. */
 export type Direction = 'ingress' | 'egress';
 
@@ -153,7 +155,7 @@ export interface Policy {
 
 export function createDefaultPolicy(overrides: Partial<Policy> = {}): Policy {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     name: 'my-network-policy',
     namespace: 'default',
     format: 'k8s',
@@ -164,7 +166,7 @@ export function createDefaultPolicy(overrides: Partial<Policy> = {}): Policy {
 
 export function createDefaultSpec(overrides: Partial<PolicySpec> = {}): PolicySpec {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     endpointSelector: {},
     ingress: [],
     egress: [],
@@ -197,7 +199,7 @@ export function newEndpoint(
   extra: Record<string, unknown> = {},
 ): Endpoint {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     group,
     ports: [],
     kind,
@@ -214,7 +216,7 @@ export function newEndpoint(
 export function cloneEndpoint(endpoint: Endpoint): Endpoint {
   return {
     ...endpoint,
-    id: crypto.randomUUID(),
+    id: generateId(),
     ports: endpoint.ports.map(p => ({ ...p })),
   } as Endpoint;
 }

@@ -2,7 +2,15 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Agent, type Dispatcher } from 'undici';
+import {
+  Agent,
+  // Node's global fetch runs on Node's *internal* undici copy, which rejects
+  // an Agent from the npm undici package (UND_ERR_INVALID_ARG). Fetch and the
+  // CA-pinning dispatcher must come from the same undici instance, so both are
+  // imported here.
+  fetch as undiciFetch,
+  type Dispatcher,
+} from 'undici';
 
 /**
  * The backend is deliberately thin (ADR-0001): serve the built SPA and proxy
@@ -33,6 +41,13 @@ export function createClusterProxyApp(config: ProxyConfig): Hono {
     typeof config.ca === 'string'
       ? new Agent({ connect: { ca: config.ca } })
       : undefined;
+  // When a CA-pinning dispatcher exists, the fetch must come from the same
+  // undici instance as that dispatcher: Node's global fetch runs on Node's
+  // internal undici copy, which rejects a foreign Agent (UND_ERR_INVALID_ARG).
+  // Without a dispatcher global fetch is fine — and is what tests stub.
+  const upstreamFetch: typeof globalThis.fetch = dispatcher
+    ? (undiciFetch as unknown as typeof globalThis.fetch)
+    : globalThis.fetch;
 
   app.all('/k8s/*', async c => {
     const upstream = new URL(c.req.path.replace(/^\/k8s/, ''), config.apiServer);
@@ -50,7 +65,7 @@ export function createClusterProxyApp(config: ProxyConfig): Hono {
 
     let upstreamRes: Response;
     try {
-      upstreamRes = await fetch(upstream.toString(), {
+      upstreamRes = await upstreamFetch(upstream.toString(), {
         method,
         headers,
         body,
@@ -59,6 +74,14 @@ export function createClusterProxyApp(config: ProxyConfig): Hono {
         ...(dispatcher ? { dispatcher: dispatcher as any } : {}),
       } as RequestInit);
     } catch (err) {
+      // The cause carries the real failure (TLS, DNS, socket); surface it in
+      // the log so a dead apiserver link is diagnosable from `kubectl logs`.
+      const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+      console.error(
+        'k8s proxy error:',
+        err instanceof Error ? err.message : err,
+        cause ? `cause: ${cause.code ?? cause.message}` : '',
+      );
       return c.json(
         { kind: 'Status', reason: 'ServiceUnavailable', message: String(err) },
         503,

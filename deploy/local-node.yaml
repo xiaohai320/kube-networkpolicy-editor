@@ -1,0 +1,62 @@
+# Deployment bound to this master node: the image lives only in this node's
+# containerd (no registry), so the pod must schedule here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netpol-editor
+  namespace: netpol-editor
+  labels:
+    app: netpol-editor
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: netpol-editor
+  template:
+    metadata:
+      labels:
+        app: netpol-editor
+    spec:
+      serviceAccountName: netpol-editor
+      nodeSelector:
+        kubernetes.io/hostname: k8s-master-node-01
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - effect: NoSchedule
+          key: node.kubernetes.io/unschedulable
+          operator: Exists
+      containers:
+        - name: editor
+          image: netpol-editor:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KUBE_API_SERVER
+              value: https://kubernetes.default.svc
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: netpol-editor
+  namespace: netpol-editor
+spec:
+  type: NodePort
+  selector:
+    app: netpol-editor
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30180
