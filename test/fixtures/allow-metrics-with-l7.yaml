@@ -1,0 +1,22 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "allow-metrics-with-l7"
+  namespace: "production"
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:app: "backend"
+  egress:
+  - toEntities:
+    - "host"
+    toPorts:
+    - ports:
+      - port: "9090"
+        protocol: "TCP"
+      rules:
+        http:
+        - method: "GET"
+          host: "metrics.example.com"
+          path:
+            matchPattern: "/metrics"

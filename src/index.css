@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: var(--theme-canvas);
+  --color-yaml-bg: var(--theme-yaml-bg);
+  --color-card-bg: var(--theme-card-bg);
+  --color-card-border: var(--theme-card-border);
+  --color-arrow-allow: var(--theme-arrow-allow);
+  --color-arrow-deny: var(--theme-arrow-deny);
+  --color-accent: var(--theme-accent);
+  --color-text-primary: var(--theme-text-primary);
+  --color-text-secondary: var(--theme-text-secondary);
+  --color-surface: var(--theme-surface);
+  --color-divider: var(--theme-divider);
+  --color-glow: var(--theme-glow);
+  --color-yaml-text: var(--theme-yaml-text);
+  --color-yaml-line-num: var(--theme-yaml-line-num);
+  --color-tab-active: var(--theme-tab-active);
+  --color-tab-inactive: var(--theme-tab-inactive);
+  --color-action-text: var(--theme-action-text);
+  --color-badge-allow-bg: var(--theme-badge-allow-bg);
+  --color-badge-allow-border: var(--theme-badge-allow-border);
+  --color-badge-deny-bg: var(--theme-badge-deny-bg);
+  --color-badge-deny-border: var(--theme-badge-deny-border);
+  --color-rating-1: var(--theme-rating-1);
+  --color-rating-2: var(--theme-rating-2);
+  --color-rating-3: var(--theme-rating-3);
+  --color-rating-4: var(--theme-rating-4);
+  --color-rating-inactive: var(--theme-rating-inactive);
+  --color-input-bg: var(--theme-input-bg);
+  --color-input-border: var(--theme-input-border);
+  --color-input-text: var(--theme-input-text);
+}
+
+/* ── Dark Synthwave ── */
+:root,
+[data-theme="dark"] {
+  --theme-canvas: #0d0221;
+  --theme-yaml-bg: #0a0118;
+  --theme-card-bg: rgba(26, 26, 46, 0.9);
+  --theme-card-border: rgba(183, 55, 242, 0.3);
+  --theme-arrow-allow: #39ff14;
+  --theme-arrow-deny: #ff2975;
+  --theme-accent: #b537f2;
+  --theme-text-primary: #e0d0ff;
+  --theme-text-secondary: #8b7baa;
+  --theme-surface: #1a1a2e;
+  --theme-divider: rgba(183, 55, 242, 0.25);
+  --theme-glow: rgba(183, 55, 242, 0.15);
+  --theme-yaml-text: #c4b5d9;
+  --theme-yaml-line-num: #5a4a7a;
+  --theme-tab-active: #e0d0ff;
+  --theme-tab-inactive: #8b7baa;
+  --theme-action-text: #8b7baa;
+  --theme-badge-allow-bg: rgba(57, 255, 20, 0.1);
+  --theme-badge-allow-border: rgba(57, 255, 20, 0.3);
+  --theme-badge-deny-bg: rgba(255, 41, 117, 0.1);
+  --theme-badge-deny-border: rgba(255, 41, 117, 0.3);
+  --theme-rating-1: #ff2975;
+  --theme-rating-2: #ff6b35;
+  --theme-rating-3: #ffd700;
+  --theme-rating-4: #39ff14;
+  --theme-rating-inactive: #2a1a3e;
+  --theme-input-bg: #1a1a2e;
+  --theme-input-border: rgba(183, 55, 242, 0.25);
+  --theme-input-text: #e0d0ff;
+
+  /* Layered elevation, matched to the live editor's popover shadow: a hairline
+   * ring + a tight contact shadow + a diffuse lift. Dark mode layers the
+   * synthwave glow on top of a real depth shadow so cards lift off the canvas
+   * instead of only glowing. */
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 15px var(--theme-glow);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.6), 0 0 20px var(--theme-glow), 0 0 40px rgba(183, 55, 242, 0.05);
+  --shadow-target: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 25px rgba(183, 55, 242, 0.25), 0 0 50px rgba(183, 55, 242, 0.1);
+  --shadow-target-hover: 0 6px 20px rgba(0, 0, 0, 0.7), 0 0 35px rgba(183, 55, 242, 0.35), 0 0 60px rgba(183, 55, 242, 0.15);
+  --shadow-modal: 0 0 0 1px rgba(17, 20, 24, 0.4), 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 30px var(--theme-glow);
+}
+
+/* ── Light — sampled from editor.networkpolicy.io ──
+   Soft cool-gray canvas, white cards, charcoal ink, steel-blue accent, and a
+   pure green / coral red for allow and deny. */
+[data-theme="light"] {
+  --theme-canvas: #ebeef0;
+  --theme-yaml-bg: #ffffff;
+  --theme-card-bg: #ffffff;
+  --theme-card-border: #d1deea;
+  --theme-arrow-allow: #028700;
+  --theme-arrow-deny: #d83b3b;
+  --theme-accent: #2689c1;
+  --theme-text-primary: #1c2127;
+  --theme-text-secondary: #5f6b7c;
+  --theme-surface: #f4f6f8;
+  --theme-divider: #dde3e9;
+  --theme-glow: rgba(35, 103, 152, 0.1);
+  --theme-yaml-text: #1c2127;
+  --theme-yaml-line-num: #8f99a8;
+  --theme-tab-active: #1c2127;
+  --theme-tab-inactive: #738091;
+  --theme-action-text: #738091;
+  --theme-badge-allow-bg: rgba(2, 135, 0, 0.08);
+  --theme-badge-allow-border: rgba(2, 135, 0, 0.25);
+  --theme-badge-deny-bg: rgba(216, 59, 59, 0.08);
+  --theme-badge-deny-border: rgba(216, 59, 59, 0.25);
+  --theme-rating-1: #d83b3b;
+  --theme-rating-2: #c5573f;
+  --theme-rating-3: #c87619;
+  --theme-rating-4: #028700;
+  --theme-rating-inactive: #e3e8ee;
+  --theme-input-bg: #ffffff;
+  --theme-input-border: #d1deea;
+  --theme-input-text: #1c2127;
+
+  /* Card elevation sampled from editor.networkpolicy.io, whose cards are
+   * BlueprintJS popovers. Three layers: a near-invisible 1px ring that
+   * crisps the edge against the light canvas, a tight contact shadow, and a
+   * soft diffuse one for the sense of lift. Hover deepens all three. */
+  --shadow-card: 0 0 0 1px rgba(17, 20, 24, 0.06), 0 2px 6px rgba(17, 20, 24, 0.08), 0 8px 20px rgba(17, 20, 24, 0.06);
+  --shadow-card-hover: 0 0 0 1px rgba(17, 20, 24, 0.1), 0 4px 12px rgba(17, 20, 24, 0.12), 0 12px 28px rgba(17, 20, 24, 0.1);
+  --shadow-target: 0 0 0 1px rgba(17, 20, 24, 0.08), 0 4px 14px rgba(17, 20, 24, 0.14), 0 16px 40px rgba(17, 20, 24, 0.1);
+  --shadow-target-hover: 0 0 0 1px rgba(17, 20, 24, 0.1), 0 6px 18px rgba(17, 20, 24, 0.18), 0 20px 48px rgba(17, 20, 24, 0.12);
+  --shadow-modal: 0 0 0 1px rgba(17, 20, 24, 0.1), 0 12px 32px rgba(17, 20, 24, 0.2), 0 8px 16px rgba(17, 20, 24, 0.12);
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* The canvas washes a few points darker toward the bottom, as in the live
+   editor. Derived from --theme-canvas so both themes pick it up unchanged. */
+.bg-canvas {
+  background-image: linear-gradient(
+    180deg,
+    var(--theme-canvas),
+    color-mix(in oklab, var(--theme-canvas) 92%, #000)
+  );
+}
+
+input, textarea, select {
+  color: var(--theme-input-text);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--theme-text-secondary);
+  opacity: 1;
+}
+
+select option {
+  color: var(--theme-text-primary);
+  background: var(--theme-surface);
+}
+
+/* ── Card elevation ──
+ * The shadow value is per-theme, so light mode gets the layered popover
+ * shadow sampled from the live editor and dark mode gets depth plus the
+ * synthwave glow. `.glow-card` is the base canvas-card class; the target pod
+ * node carries the stronger `--shadow-target*`. The rule is outside Tailwind's
+ * layers, so it wins over utility `shadow-*` classes on the same element. */
+.glow-card {
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.2s ease;
+}
+.glow-card:hover {
+  box-shadow: var(--shadow-card-hover);
+}
+
+[data-target-pod] {
+  box-shadow: var(--shadow-target);
+  transition: box-shadow 0.2s ease;
+}
+[data-target-pod]:hover {
+  box-shadow: var(--shadow-target-hover);
+}
+
+/* Modals float above the canvas backdrop, so they get the strongest elevation
+ * — the `--shadow-modal` token layers a ring on top of a deep drop shadow. */
+.shadow-pop {
+  box-shadow: var(--shadow-modal);
+}

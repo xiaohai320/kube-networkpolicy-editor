@@ -1,0 +1,21 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "allow-egress-dns"
+  namespace: "default"
+spec:
+  endpointSelector:
+    matchExpressions:
+    - key: "k8s:app"
+      operator: In
+      values:
+      - "app1"
+  egress:
+  - toEntities:
+    - "kube-dns"
+    toPorts:
+    - ports:
+      - port: "53"
+        protocol: "UDP"
+      - port: "53"
+        protocol: "TCP"

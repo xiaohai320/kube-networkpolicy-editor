@@ -1,0 +1,32 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "allow-api-egress"
+  namespace: "production"
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:app: "frontend"
+  egress:
+  - toFQDNs:
+    - matchName: "api.example.com"
+    toPorts:
+    - ports:
+      - port: "443"
+        protocol: "TCP"
+  - toCIDRSet:
+    - cidr: 0.0.0.0/0
+      except:
+      - 10.0.0.0/8
+      - 192.168.0.0/16
+  - toEntities:
+    - "host"
+  - toEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: "kube-system"
+        k8s:app: "metrics"
+      matchExpressions:
+      - key: "k8s:tier"
+        operator: In
+        values:
+        - "back"
