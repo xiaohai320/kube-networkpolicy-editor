@@ -1,10 +1,11 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
-import { Copy, Download, Upload, Check, CloudUpload, Loader2 } from 'lucide-react';
+import { Copy, Download, Upload, Check, CloudUpload, Loader2, AlertTriangle } from 'lucide-react';
 import { usePolicyContext } from '@/state/context';
 import { importPolicy, setFormat, setClusterSync as setClusterSyncAction } from '@/state/actions';
 import { applyClusterPolicy, ClusterApiError } from '@/lib/cluster-api';
-import { generateK8sYaml } from '@/lib/yaml-gen-k8s';
-import { generateCiliumYaml } from '@/lib/yaml-gen-cilium';
+import { generateK8sYamlMapped } from '@/lib/yaml-gen-k8s';
+import { generateCiliumYamlMapped } from '@/lib/yaml-gen-cilium';
+import { useHoveredRule } from '@/lib/highlight-state';
 import { detectAndParse, PolicyParseError } from '@/lib/yaml-parser';
 import { sanitizeFilename } from '@/lib/utils';
 import { useTranslation } from '@/i18n';
@@ -23,13 +24,25 @@ export function YamlPanel() {
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [conflicted, setConflicted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const yaml = useMemo(() => {
-    return activeTab === 'k8s'
-      ? generateK8sYaml(state.policy)
-      : generateCiliumYaml(state.policy);
-  }, [state.policy, activeTab]);
+  const hoveredRuleId = useHoveredRule();
+
+  const { yaml, activeRuleMap } = useMemo(() => {
+    const mapped =
+      activeTab === 'k8s'
+        ? generateK8sYamlMapped(state.policy)
+        : generateCiliumYamlMapped(state.policy);
+    // Only the hovered rule's range lights up. The lookup must tolerate a
+    // stale id: deleting the hovered row unmounts it without a mouseleave, so
+    // the store can still name a rule the generator no longer emitted.
+    const range = hoveredRuleId !== null ? mapped.ruleMap[hoveredRuleId] : undefined;
+    return {
+      yaml: mapped.yaml,
+      activeRuleMap: hoveredRuleId !== null && range ? { [hoveredRuleId]: range } : undefined,
+    };
+  }, [state.policy, activeTab, hoveredRuleId]);
 
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(yaml);
@@ -82,21 +95,26 @@ export function YamlPanel() {
     [dispatch, parseErrorMessage],
   );
 
-  const handleApply = useCallback(async () => {
+  const handleApply = useCallback(async (force = false) => {
     setApplying(true);
     setError(null);
+    setConflicted(false);
     try {
-      const manifest = activeTab === 'k8s' ? generateK8sYaml(state.policy) : generateCiliumYaml(state.policy);
+      // `yaml` is the live generated text — identical to what the panel shows.
+      const manifest = yaml;
       await applyClusterPolicy(
         { kind: activeTab === 'k8s' ? 'NetworkPolicy' : 'CiliumNetworkPolicy', namespace: state.policy.namespace, name: state.policy.name },
         manifest,
+        { force },
       );
       dispatch(setClusterSyncAction('applied'));
       setApplied(true);
       setTimeout(() => setApplied(false), 1500);
     } catch (err) {
       if (err instanceof ClusterApiError && err.status === 409) {
-        setError(t('cluster-conflict'));
+        // Another controller (Helm/fleet/…) owns overlapping fields. Not an
+        // error state: the themed banner explains and offers explicit takeover.
+        setConflicted(true);
       } else if (err instanceof ClusterApiError) {
         setError(err.message);
       } else {
@@ -105,7 +123,7 @@ export function YamlPanel() {
     } finally {
       setApplying(false);
     }
-  }, [state.policy, activeTab, dispatch, t]);
+  }, [yaml, activeTab, state.policy, dispatch, t]);
 
   const handleYamlEdit = useCallback(
     (editedYaml: string) => {
@@ -172,11 +190,30 @@ export function YamlPanel() {
         </div>
       </div>
 
-      {/* Error banner */}
+      {/* Conflict banner: themed, explanatory, with an explicit force-apply exit */}
+      {conflicted && (
+        <div className="flex items-center gap-2 px-4 py-1.5 text-xs bg-badge-deny-bg text-text-primary border-b border-badge-deny-border">
+          <AlertTriangle size={12} className="text-arrow-deny shrink-0" />
+          <span className="flex-1 min-w-0">{t('cluster-conflict')}</span>
+          <button
+            className="px-2 py-0.5 rounded border border-arrow-deny/60 text-arrow-deny hover:bg-surface transition-colors shrink-0"
+            onClick={() => void handleApply(true)}
+            disabled={applying}
+          >
+            {t('cluster-apply-force')}
+          </button>
+          <button className="text-text-secondary underline shrink-0" onClick={() => setConflicted(false)}>
+            {t('action-dismiss')}
+          </button>
+        </div>
+      )}
+
+      {/* Error banner: theme tokens, not raw red-900 hardcodes */}
       {error && (
-        <div className="px-4 py-1.5 bg-red-900/40 text-red-300 text-xs border-b border-red-800">
-          {error}
-          <button className="ml-2 underline" onClick={() => setError(null)}>
+        <div className="flex items-center gap-2 px-4 py-1.5 text-xs bg-badge-deny-bg text-text-primary border-b border-badge-deny-border">
+          <AlertTriangle size={12} className="text-arrow-deny shrink-0" />
+          <span className="flex-1 min-w-0">{error}</span>
+          <button className="text-text-secondary underline shrink-0" onClick={() => setError(null)}>
             {t('action-dismiss')}
           </button>
         </div>
@@ -187,7 +224,7 @@ export function YamlPanel() {
 
       {/* YAML display */}
       <div className="flex-1 overflow-auto">
-        <YamlDisplay yaml={yaml} onYamlChange={handleYamlEdit} />
+        <YamlDisplay yaml={yaml} ruleMap={activeRuleMap} onYamlChange={handleYamlEdit} />
       </div>
     </div>
   );

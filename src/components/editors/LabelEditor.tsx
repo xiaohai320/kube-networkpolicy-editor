@@ -9,6 +9,7 @@ import { Plus, X } from 'lucide-react';
 import { generateId } from '@/lib/utils';
 import { validateLabelKey, validateLabelValue } from '@/lib/validators';
 import { tr, useTranslation, type Msg, type TFunc } from '@/i18n';
+import { ClusterLabelPicker } from './ClusterLabelPicker';
 import { BTN_ADD, BTN_ROW_REMOVE } from '../ui/button';
 
 interface LabelRow {
@@ -149,6 +150,20 @@ export function LabelEditor({ labels, onChange }: LabelEditorProps) {
     setData(prev => [...prev, { id: generateId(), key: '', value: '' }]);
   }, []);
 
+  const addLabel = useCallback(
+    (key: string, value: string) => {
+      onChange({ ...labels, [key]: value });
+    },
+    [labels, onChange],
+  );
+
+  const addLabels = useCallback(
+    (picked: Record<string, string>) => {
+      onChange({ ...labels, ...picked });
+    },
+    [labels, onChange],
+  );
+
   const table = useReactTable({
     data,
     columns,
@@ -174,12 +189,15 @@ export function LabelEditor({ labels, onChange }: LabelEditorProps) {
           </tbody>
         </table>
       )}
-      <button
-        onClick={addRow}
-        className={BTN_ADD}
-      >
-        <Plus size={12} /> {t('action-add-label')}
-      </button>
+      <div className="flex items-center justify-between">
+        <button
+          onClick={addRow}
+          className={BTN_ADD}
+        >
+          <Plus size={12} /> {t('action-add-label')}
+        </button>
+        <ClusterLabelPicker onPick={addLabel} onPickAll={addLabels} />
+      </div>
     </div>
   );
 }

@@ -38,6 +38,31 @@ spec:
           env:
             - name: KUBE_API_SERVER
               value: https://kubernetes.default.svc
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_DEPLOYMENT_NAME
+              value: netpol-editor
+            # Built-in admin; the password is changeable in the UI and both
+            # values are then persisted by the server itself.
+            - name: ADMIN_USERNAME
+              value: admin
+            - name: ADMIN_PASSWORD
+              value: akshdjkashekqw
+            - name: ALLOWED_USERS
+              value: ""
+            - name: OIDC_ISSUER
+              value: https://platform.liangkui.co/platform/idp
+            - name: OIDC_CLIENT_ID
+              value: dex-idp
+            - name: OIDC_CLIENT_SECRET
+              value: 628e0eb5-3f8f-4cd9-86ba-2dbf36467ad4
+            - name: OIDC_INSECURE_TLS
+              value: "true"
+            # NodePort access origin — drives the OIDC redirect_uri.
+            - name: PUBLIC_ORIGIN
+              value: http://192.168.16.231:30180
           resources:
             requests:
               cpu: 50m

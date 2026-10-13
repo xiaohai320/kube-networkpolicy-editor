@@ -4,6 +4,7 @@ import {
   RefreshCw,
   AlertCircle,
   Loader2,
+  X,
 } from 'lucide-react';
 import { useTranslation } from '@/i18n';
 import {
@@ -24,6 +25,7 @@ type LoadState = 'idle' | 'loading' | 'loaded' | 'error';
 interface ClusterPanelProps {
   /** Load a parsed policy into a new editor page. */
   onLoadPolicy: (yaml: string, label: string) => void;
+  onClose: () => void;
 }
 
 /**
@@ -31,9 +33,8 @@ interface ClusterPanelProps {
  * into editor pages. Applying lives with the YAML panel — this panel only
  * reads.
  */
-export function ClusterPanel({ onLoadPolicy }: ClusterPanelProps) {
+export function ClusterPanel({ onLoadPolicy, onClose }: ClusterPanelProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
   const [creds, setCreds] = useState(loadDevCredentials);
   const [state, setState] = useState<LoadState>('idle');
   const [policies, setPolicies] = useState<ClusterPolicyRef[]>([]);
@@ -105,26 +106,14 @@ export function ClusterPanel({ onLoadPolicy }: ClusterPanelProps) {
     [policies, nsFilter, search],
   );
 
-  if (!open) {
-    return (
-      <button
-        className={`fixed left-3 top-16 z-40 ${BTN_TOOLBAR_TEXT}`}
-        onClick={() => setOpen(true)}
-        aria-label={t('cluster-panel-title')}
-      >
-        <Cloud size={14} />
-      </button>
-    );
-  }
-
   return (
     <aside
-      className="fixed left-0 top-10 z-40 h-[calc(100%-2.5rem)] w-72 bg-surface border-r border-divider flex flex-col"
+      className="w-72 shrink-0 bg-surface border-r border-divider flex flex-col min-h-0"
       role="complementary"
       aria-label={t('cluster-panel-title')}
     >
       <div className="flex items-center justify-between px-3 py-2 border-b border-divider">
-        <span className="text-sm font-semibold">{t('cluster-panel-title')}</span>
+        <span className="text-sm font-semibold text-text-primary">{t('cluster-panel-title')}</span>
         <div className="flex items-center gap-1">
           <button
             className={BTN_TOOLBAR_TEXT}
@@ -134,8 +123,8 @@ export function ClusterPanel({ onLoadPolicy }: ClusterPanelProps) {
           >
             {state === 'loading' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </button>
-          <button className={BTN_TOOLBAR_TEXT} onClick={() => setOpen(false)} aria-label={t('action-dismiss')}>
-            ✕
+          <button className={BTN_TOOLBAR_TEXT} onClick={onClose} aria-label={t('action-dismiss')}>
+            <X size={14} />
           </button>
         </div>
       </div>
@@ -166,7 +155,7 @@ export function ClusterPanel({ onLoadPolicy }: ClusterPanelProps) {
       {error && (
         <div className="px-3 py-1.5 text-xs text-red-300 bg-red-900/40 flex items-center gap-1">
           <AlertCircle size={12} />
-          <span className="flex-1">{error}</span>
+          <span className="flex-1 text-red-300">{error}</span>
           <button className="underline" onClick={() => setError(null)}>
             {t('action-dismiss')}
           </button>
@@ -217,7 +206,7 @@ export function ClusterPanel({ onLoadPolicy }: ClusterPanelProps) {
                     {ref.kind === 'CiliumNetworkPolicy' ? 'CNP' : 'NP'}
                   </span>
                   <span className="text-text-secondary shrink-0">{ref.namespace}</span>
-                  <span className="truncate">{ref.name}</span>
+                  <span className="truncate text-text-primary">{ref.name}</span>
                 </button>
               ))
             )}

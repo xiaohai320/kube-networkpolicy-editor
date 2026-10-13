@@ -10,7 +10,7 @@ type Theme = 'dark' | 'light';
  */
 const STORAGE_KEY = 'netpol-theme.v2';
 
-function getInitialTheme(): Theme {
+export function getInitialTheme(): Theme {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'light' || stored === 'dark') return stored;

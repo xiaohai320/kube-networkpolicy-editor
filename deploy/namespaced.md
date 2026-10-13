@@ -18,10 +18,15 @@ metadata:
 rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
-    verbs: ["get", "list", "patch"]
+    verbs: ["get", "list", "patch", "create"]
   - apiGroups: ["cilium.io"]
     resources: ["ciliumnetworkpolicies"]
-    verbs: ["get", "list", "patch"]
+    verbs: ["get", "list", "patch", "create"]
+  # Template labels of workloads feed the label pickers ("from cluster").
+  # Namespace-scoped resources: listable inside this Role's namespace only.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

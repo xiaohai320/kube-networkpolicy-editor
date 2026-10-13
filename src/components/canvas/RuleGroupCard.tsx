@@ -5,6 +5,7 @@ import { isK8sUnrepresentable } from '@/types/policy';
 import { endpointSummary, portSummary } from '@/lib/summarize';
 import { useTranslation } from '@/i18n';
 import { BTN_ICON, BTN_ROW_REMOVE } from '@/components/ui/button';
+import { setHoveredRule } from '@/lib/highlight-state';
 import { RuleDialog } from './RuleDialog';
 import type { SubTypeOption } from './RulePickers';
 
@@ -84,6 +85,8 @@ export function RuleGroupCard({
               >
                 <div
                   className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface/50 group"
+                  onMouseEnter={() => setHoveredRule(rule.id)}
+                  onMouseLeave={() => setHoveredRule(null)}
                   onClick={() => setDialog({ mode: 'edit', rule })}
                 >
                   <span className="text-xs text-text-primary flex-1 truncate">

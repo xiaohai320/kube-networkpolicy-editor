@@ -5,7 +5,16 @@ metadata:
 rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
-    verbs: ["get", "list", "patch"]
+    verbs: ["get", "list", "patch", "create"]
   - apiGroups: ["cilium.io"]
     resources: ["ciliumnetworkpolicies"]
-    verbs: ["get", "list", "patch"]
+    verbs: ["get", "list", "patch", "create"]
+  # Template labels of workloads feed the label pickers ("from cluster").
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["list"]
+  # Admin settings (password, allowlist) persist as env on this one Deployment.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["netpol-editor"]
+    verbs: ["get", "patch"]

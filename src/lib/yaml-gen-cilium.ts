@@ -19,6 +19,7 @@ import {
   isEmptySelector,
   toCiliumPodLabels,
 } from './label-utils';
+import { extractRuleMap, withRuleSentinel, type MappedYaml } from './yaml-rule-map';
 
 type CiliumRule = Record<string, unknown>;
 
@@ -194,7 +195,11 @@ function buildRule(
  * Omitting `ingress`/`egress` means allow-all, so this only returns `null`
  * when there are no rules AND default-deny is off.
  */
-function rulesFor(spec: PolicySpec, direction: Direction, policyNamespace: string): CiliumRule[] | null {
+function rulesFor(
+  spec: PolicySpec,
+  direction: Direction,
+  policyNamespace: string,
+): Array<{ rule: CiliumRule; id: string | null }> | null {
   const prefix = direction === 'ingress' ? 'from' : 'to';
   const endpoints = direction === 'ingress' ? spec.ingress : spec.egress;
   const denied = direction === 'ingress' ? spec.defaultDenyIngress : spec.defaultDenyEgress;
@@ -202,15 +207,20 @@ function rulesFor(spec: PolicySpec, direction: Direction, policyNamespace: strin
   // An empty rule object is dropped, not emitted: in Cilium `ingress: [{}]` is
   // the deny-all marker, so a stub for an unrepresentable rule would silently
   // cancel every rule in the same list.
-  const rules = endpoints.map(e => buildRule(e, prefix, policyNamespace)).filter(r => Object.keys(r).length > 0);
+  const rules = endpoints
+    .map(e => ({ rule: buildRule(e, prefix, policyNamespace), id: e.id }))
+    .filter(r => Object.keys(r.rule).length > 0);
   if (rules.length > 0) return rules;
-  return denied ? [{}] : null;
+  // The deny-all marker object has no canvas rule behind it — no sentinel.
+  return denied ? [{ rule: {}, id: null }] : null;
 }
 
 interface SpecCilium {
   spec: Record<string, unknown>;
   /** Directions where imported rules had to be preserved as a comment. */
   unsupported: Direction[];
+  /** Endpoint ids of the emitted rules, per direction, in emission order. */
+  ruleIds: { ingress: string[]; egress: string[] };
 }
 
 function specToCilium(spec: PolicySpec, policy: Policy): SpecCilium {
@@ -220,6 +230,7 @@ function specToCilium(spec: PolicySpec, policy: Policy): SpecCilium {
   };
 
   const unsupported: Direction[] = [];
+  const ruleIds: SpecCilium['ruleIds'] = { ingress: [], egress: [] };
   for (const direction of ['ingress', 'egress'] as Direction[]) {
     const rules = rulesFor(spec, direction, policy.namespace);
     // Rules imported from YAML that the model cannot represent are appended
@@ -227,13 +238,17 @@ function specToCilium(spec: PolicySpec, policy: Policy): SpecCilium {
     const extra = policy.unsupported?.[direction] ?? [];
 
     if (rules === null && extra.length === 0) continue;
-    const rulesOut = [...(rules ?? []), ...extra];
+    const rulesOut = [
+      ...(rules ?? []).map(({ rule, id }) => (id === null ? rule : withRuleSentinel(rule, id))),
+      ...extra,
+    ];
     if (rulesOut.length === 0) continue;
     out[direction] = rulesOut;
+    if (rules !== null) ruleIds[direction] = rules.map(r => r.id).filter((id): id is string => id !== null);
     if (extra.length > 0) unsupported.push(direction);
   }
 
-  return { spec: out, unsupported };
+  return { spec: out, unsupported, ruleIds };
 }
 
 /**
@@ -265,6 +280,14 @@ function annotateUnsupported(yamlText: string, directions: Direction[]): string 
 }
 
 export function generateCiliumYaml(policy: Policy): string {
+  return generateCiliumYamlMapped(policy).yaml;
+}
+
+/**
+ * Same YAML text plus the hover-highlight rule map. Unlike the K8s generator
+ * there is only ever one document: several selector groups ride in `specs[]`.
+ */
+export function generateCiliumYamlMapped(policy: Policy): MappedYaml {
   const manifest: Record<string, unknown> = {
     apiVersion: 'cilium.io/v2',
     kind: 'CiliumNetworkPolicy',
@@ -277,7 +300,8 @@ export function generateCiliumYaml(policy: Policy): string {
   manifest[policy.specs.length === 1 ? 'spec' : 'specs'] =
     policy.specs.length === 1 ? value[0] : value;
 
-  return annotateUnsupported(yaml.dump(manifest, DUMP_OPTIONS), note);
+  const dumped = annotateUnsupported(yaml.dump(manifest, DUMP_OPTIONS), note);
+  return extractRuleMap(dumped, 0);
 }
 
 /**

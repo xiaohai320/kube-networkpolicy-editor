@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PolicyProvider } from '@/state/context';
 import { VisualCanvas } from '@/components/canvas/VisualCanvas';
 import { DraggableDivider } from '@/components/ui/DraggableDivider';
@@ -8,8 +8,13 @@ import { LocaleToggle } from '@/i18n/LocaleToggle';
 import { PolicyPageBar, type PolicyPage } from '@/components/ui/PolicyPageBar';
 import { ClusterPanel } from '@/components/cluster/ClusterPanel';
 import type { EditorState, ClusterSync } from '@/state/actions';
+import { Cloud, X, Users, LogOut } from 'lucide-react';
+import { fetchMe, logout, type AuthMe } from '@/lib/auth-api';
+import { LoginPage } from '@/components/auth/LoginPage';
+import { UserAdminPanel } from '@/components/auth/UserAdminPanel';
 import { useTranslation } from '@/i18n';
 import { initialState } from '@/state/reducer';
+import { BTN_TOOLBAR_TEXT } from '@/components/ui/button';
 import { createDefaultPolicy } from '@/types/policy';
 import { detectAndParse } from '@/lib/yaml-parser';
 import { generateId } from '@/lib/utils';
@@ -47,12 +52,36 @@ function clusterLoadedPage(yaml: string, label: string): PageData | undefined {
 
 function App() {
   const [splitPercent, setSplitPercent] = useState(60);
+  const [clusterOpen, setClusterOpen] = useState(false);
+  const [authState, setAuthState] = useState<AuthMe | 'checking' | null>('checking');
+  const [userAdminOpen, setUserAdminOpen] = useState(false);
   const [pages, setPages] = useState<PageData[]>(() => [createPage('Policy 1')]);
   const [activeId, setActiveId] = useState<string>(() => pages[0]!.page.id);
   const stateRef = useRef<Record<string, EditorState>>({});
 
   // `pages` is never empty: handleRemovePage keeps at least one entry.
   const activePage = pages.find(p => p.page.id === activeId) ?? pages[0]!;
+  const { t } = useTranslation();
+
+  // Session probe: 'checking' holds the editor until answered, so a logged-out
+  // visitor never sees the policy UI flash before the gate. The effect keys on
+  // the checking state itself — after a successful login the gate sets
+  // 'checking' again, which must re-run this probe, not just spin forever.
+  useEffect(() => {
+    if (authState !== 'checking') return;
+    let live = true;
+    fetchMe()
+      .then(me => live && setAuthState(me))
+      .catch(() => live && setAuthState({ authenticated: false }));
+    return () => {
+      live = false;
+    };
+  }, [authState]);
+
+  const handleLogout = useCallback(async () => {
+    await logout();
+    setAuthState({ authenticated: false });
+  }, []);
 
   const handleStateChange = useCallback(
     (state: EditorState) => {
@@ -83,23 +112,20 @@ function App() {
 
   const handleRemovePage = useCallback(
     (id: string) => {
-      setPages(prev => {
-        const filtered = prev.filter(p => p.page.id !== id);
-        return filtered.length > 0 ? filtered : prev;
-      });
+      // One synchronous decision off the current snapshot: the previous
+      // two-`setPages` version re-ran the filter on an already-filtered list,
+      // got index -1, and dereferenced `remaining[-1]` — a TypeError in the
+      // state updater that blanked the page whenever the active tab closed.
+      const idx = pages.findIndex(p => p.page.id === id);
+      if (idx === -1) return;
+      const remaining = pages.filter(p => p.page.id !== id);
+      if (remaining.length === 0) return;
+      setPages(remaining);
       if (activeId === id) {
-        setPages(prev => {
-          const idx = prev.findIndex(p => p.page.id === id);
-          const remaining = prev.filter(p => p.page.id !== id);
-          if (remaining.length > 0) {
-            // `remaining` is non-empty, so this index is always in range.
-            setActiveId(remaining[Math.min(idx, remaining.length - 1)]!.page.id);
-          }
-          return remaining.length > 0 ? remaining : prev;
-        });
+        setActiveId(remaining[Math.min(idx, remaining.length - 1)]!.page.id);
       }
     },
-    [activeId],
+    [pages, activeId],
   );
 
   const handleSelectPage = useCallback(
@@ -138,6 +164,10 @@ function App() {
     [activeId],
   );
 
+  if (authState === 'checking' || authState === null || !authState.authenticated) {
+    return <LoginPage onLoggedIn={() => setAuthState('checking')} />;
+  }
+
   return (
     <div className="flex flex-col h-screen">
       {/* Page tabs */}
@@ -151,22 +181,49 @@ function App() {
           onRename={handleRenamePage}
         />
         <div className="flex items-center gap-1 pr-2">
+          <button
+            className={BTN_TOOLBAR_TEXT}
+            onClick={() => setClusterOpen(o => !o)}
+            aria-label={t('cluster-panel-title')}
+          >
+            <Cloud size={14} />
+            {clusterOpen && <X size={14} />}
+          </button>
+          {authState.role === 'admin' && (
+            <button
+              className={BTN_TOOLBAR_TEXT}
+              onClick={() => setUserAdminOpen(true)}
+              aria-label={t('auth-users-title')}
+              title={t('auth-users-title')}
+            >
+              <Users size={14} />
+            </button>
+          )}
+          <button
+            className={BTN_TOOLBAR_TEXT}
+            onClick={() => void handleLogout()}
+            aria-label={t('auth-logout')}
+            title={`${authState.user ?? ''} · ${t('auth-logout')}`}
+          >
+            <LogOut size={14} />
+          </button>
           <ClusterSyncBadge sync={activePage.state.clusterSync ?? 'local'} />
           <LocaleToggle />
           <ThemeToggle />
         </div>
       </div>
 
-      {/* Cluster inventory panel (fixed overlay) */}
-      <ClusterPanel onLoadPolicy={handleLoadFromCluster} />
-
-      {/* Main content — keyed by active page to force remount */}
-      <PolicyProvider
-        key={activeId}
-        initial={activePage.state ?? initialState}
-        onStateChange={handleStateChange}
-      >
-        <div className="flex flex-col flex-1 min-h-0">
+      {/* Main content: cluster panel pushes (not covers) the editor area */}
+      <div className="flex flex-1 min-h-0">
+        {clusterOpen && (
+          <ClusterPanel onLoadPolicy={handleLoadFromCluster} onClose={() => setClusterOpen(false)} />
+        )}
+        <PolicyProvider
+          key={activeId}
+          initial={activePage.state ?? initialState}
+          onStateChange={handleStateChange}
+        >
+          <div className="flex flex-col flex-1 min-h-0">
           {/* Visual Canvas */}
           <div
             className="bg-canvas overflow-auto relative"
@@ -185,8 +242,10 @@ function App() {
           >
             <YamlPanel />
           </div>
-        </div>
-      </PolicyProvider>
+          </div>
+        </PolicyProvider>
+      </div>
+      {userAdminOpen && <UserAdminPanel onClose={() => setUserAdminOpen(false)} />}
     </div>
   );
 }

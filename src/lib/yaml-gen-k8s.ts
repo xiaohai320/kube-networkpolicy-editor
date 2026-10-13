@@ -11,6 +11,7 @@ import type {
 } from '@/types/policy';
 import { isK8sUnrepresentable } from '@/types/policy';
 import { ALL_NAMESPACES, KUBE_DNS, NAMESPACE_NAME_LABEL } from './label-utils';
+import { extractRuleMap, withRuleSentinel, type MappedYaml } from './yaml-rule-map';
 
 interface K8sPort {
   port: number | string;
@@ -118,7 +119,10 @@ function buildPeer(endpoint: Endpoint): K8sPeer {
  * expresses deny-all through `policyTypes` alone, so an empty rule list with
  * default-deny still emits the policyType — that is handled by the caller.
  */
-function rulesFor(spec: PolicySpec, direction: Direction): Array<K8sRule | string> | null {
+function rulesFor(
+  spec: PolicySpec,
+  direction: Direction,
+): Array<{ rule: K8sRule; id: string }> | null {
   const endpoints = direction === 'ingress' ? spec.ingress : spec.egress;
   if (endpoints.length === 0) return null;
 
@@ -130,7 +134,7 @@ function rulesFor(spec: PolicySpec, direction: Direction): Array<K8sRule | strin
     const rule: K8sRule = { [prefix]: [buildPeer(endpoint)] };
     const ports = k8sPorts(endpoint.ports);
     if (ports) rule.ports = ports;
-    return rule;
+    return { rule, id: endpoint.id };
   });
 }
 
@@ -170,6 +174,8 @@ interface SpecDocument {
   doc: Record<string, unknown>;
   /** Directions whose rules were all dropped and therefore carry a note. */
   omitted: Direction[];
+  /** Endpoint ids of the emitted rules, per direction, in emission order. */
+  ruleIds: { ingress: string[]; egress: string[] };
 }
 
 function specToDocument(policy: Policy, spec: PolicySpec, name?: string): SpecDocument {
@@ -188,6 +194,7 @@ function specToDocument(policy: Policy, spec: PolicySpec, name?: string): SpecDo
   if (policyTypes.length > 0) specObj.policyTypes = policyTypes;
 
   const omitted: Direction[] = [];
+  const ruleIds: SpecDocument['ruleIds'] = { ingress: [], egress: [] };
   for (const direction of ['ingress', 'egress'] as Direction[]) {
     const endpoints = direction === 'ingress' ? spec.ingress : spec.egress;
     const dropped = endpoints.filter(e => isK8sUnrepresentable(e));
@@ -199,12 +206,13 @@ function specToDocument(policy: Policy, spec: PolicySpec, name?: string): SpecDo
       if (dropped.length === 0) continue;
       specObj[direction] = [];
     } else {
-      specObj[direction] = rules;
+      specObj[direction] = rules.map(({ rule, id }) => withRuleSentinel(rule, id));
+      ruleIds[direction] = rules.map(r => r.id);
     }
     if (dropped.length > 0) omitted.push(direction);
   }
 
-  return { doc: out, omitted };
+  return { doc: out, omitted, ruleIds };
 }
 
 function annotateUnsupported(yamlText: string, omitted: Direction[]): string {
@@ -225,13 +233,28 @@ function annotateUnsupported(yamlText: string, omitted: Direction[]): string {
  * NetworkPolicy per group.
  */
 export function generateK8sYaml(policy: Policy): string {
+  return generateK8sYamlMapped(policy).yaml;
+}
+
+/**
+ * Same YAML text plus the hover-highlight rule map. Single-spec policies map
+ * rules directly; multi-spec exports (one document per group) shift each
+ * document's ranges by the number of lines already emitted.
+ */
+export function generateK8sYamlMapped(policy: Policy): MappedYaml {
   const specs = policy.specs.length > 0 ? policy.specs : [createEmptySpec()];
-  return specs
-    .map((spec, i) => {
-      const built = specToDocument(policy, spec, specs.length > 1 ? `${policy.name}-${i + 1}` : undefined);
-      return annotateUnsupported(yaml.dump(built.doc, DUMP_OPTIONS), built.omitted);
-    })
-    .join('\n---\n');
+  const parts: string[] = [];
+  const ruleMap: MappedYaml['ruleMap'] = {};
+  let baseLine = 0;
+  for (const [i, spec] of specs.entries()) {
+    const built = specToDocument(policy, spec, specs.length > 1 ? `${policy.name}-${i + 1}` : undefined);
+    const dumped = yaml.dump(built.doc, DUMP_OPTIONS);
+    const mapped = extractRuleMap(annotateUnsupported(dumped, built.omitted), baseLine);
+    for (const [id, range] of Object.entries(mapped.ruleMap)) ruleMap[id] = range;
+    parts.push(mapped.yaml);
+    baseLine += mapped.yaml.split('\n').length + 1; // +1 for the `---` separator
+  }
+  return { yaml: parts.join('\n---\n'), ruleMap };
 }
 
 function createEmptySpec(): PolicySpec {

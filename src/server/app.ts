@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createAuthRoutes, type AuthDeps } from './auth';
 import {
   Agent,
   // Node's global fetch runs on Node's *internal* undici copy, which rejects
@@ -34,8 +35,27 @@ const FORWARDED_HEADERS = ['accept', 'content-type', 'user-agent'];
  * Build the Hono app. Exposed for tests: pass `ca: false` so stubbed upstream
  * fetches don't need TLS plumbing.
  */
-export function createClusterProxyApp(config: ProxyConfig): Hono {
+export interface AppConfig extends ProxyConfig {
+  /** Auth wiring; absent in tests that don't exercise login. */
+  auth?: AuthDeps;
+}
+
+export function createClusterProxyApp(config: AppConfig): Hono {
   const app = new Hono();
+
+  // Auth (login, OIDC, admin user management) mounts first: these paths are
+  // the only ones reachable without a session.
+  const auth = config.auth ? createAuthRoutes(config.auth) : null;
+  if (auth) {
+    app.route('/', auth.routes);
+    // /k8s/* is the apiserver's identity — it must never answer unauthenticated.
+    app.use('/k8s/*', async (c, next) => {
+      if (!auth.hasSession(c.req.header('cookie'))) {
+        return c.json({ kind: 'Status', reason: 'Unauthorized', message: 'login required' }, 401);
+      }
+      await next();
+    });
+  }
   // One dispatcher for the app lifetime: undici pools connections behind it.
   const dispatcher: Dispatcher | undefined =
     typeof config.ca === 'string'
@@ -45,9 +65,11 @@ export function createClusterProxyApp(config: ProxyConfig): Hono {
   // undici instance as that dispatcher: Node's global fetch runs on Node's
   // internal undici copy, which rejects a foreign Agent (UND_ERR_INVALID_ARG).
   // Without a dispatcher global fetch is fine — and is what tests stub.
-  const upstreamFetch: typeof globalThis.fetch = dispatcher
-    ? (undiciFetch as unknown as typeof globalThis.fetch)
-    : globalThis.fetch;
+  // Resolved per call, not captured at construction: tests stub global fetch
+  // after building the app.
+  const upstreamFetch: () => typeof globalThis.fetch = dispatcher
+    ? () => (undiciFetch as unknown as typeof globalThis.fetch)
+    : () => globalThis.fetch;
 
   app.all('/k8s/*', async c => {
     const upstream = new URL(c.req.path.replace(/^\/k8s/, ''), config.apiServer);
@@ -65,7 +87,7 @@ export function createClusterProxyApp(config: ProxyConfig): Hono {
 
     let upstreamRes: Response;
     try {
-      upstreamRes = await upstreamFetch(upstream.toString(), {
+      upstreamRes = await upstreamFetch()(upstream.toString(), {
         method,
         headers,
         body,
@@ -133,7 +155,7 @@ export function withStatic(app: Hono, distDir: string): Hono {
 }
 
 /** Entry point used by the Docker image; not exercised in tests. */
-export function startServer(config: ProxyConfig, distDir: string, port: number): void {
+export function startServer(config: AppConfig, distDir: string, port: number): void {
   const app = withStatic(createClusterProxyApp(config), distDir);
   serve({ fetch: app.fetch, port });
 }
