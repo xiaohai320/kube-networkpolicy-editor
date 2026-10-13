@@ -4,21 +4,6 @@ A browser-based visual editor for Kubernetes `NetworkPolicy` and Cilium `CiliumN
 
 Inspired by [editor.networkpolicy.io](https://editor.networkpolicy.io/). Built as a fork of [kpod](https://github.com/Blackout-Industries/kpod) — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-## Features
-
-- **Visual canvas** — ingress sources on the left, the target pod in the middle, egress destinations on the right, connected by SVG arrows
-- **Grouped rule cards** — *Outside Cluster*, *In Namespace*, *In Cluster* — each with its own sub-type picker
-- **Dual format** — emits both Kubernetes `NetworkPolicy` and Cilium `CiliumNetworkPolicy` YAML from the same model
-- **Bidirectional YAML sync** — edit YAML directly or use the visual editor; changes propagate both ways
-- **Import** — upload or paste an existing policy; K8s vs Cilium is auto-detected
-- **Cilium-native constructs** — `fromEntities`/`toEntities`, `toFQDNs`, `fromCIDR` vs `fromCIDRSet`, DNS rules
-- **Default-deny awareness** — per-direction allow/deny badges; Cilium's `ingress: [{}]` cancels sibling rules
-- **Validation panel** — invalid CIDRs, ports, labels, FQDN patterns, duplicate rules, `0.0.0.0/0`, Cilium-only rules in a K8s policy
-- **Policy rating** — 4-level security strength indicator based on rule specificity
-- **English / 中文** — a toolbar toggle swaps the whole interface, including validator and warning messages
-- **Light / dark theme** — the default light palette is sampled from `editor.networkpolicy.io`; a synthwave dark theme is one toggle away
-- **Fully offline** — no backend, no build-time network access
-
 ## Quick Start
 
 ```bash
