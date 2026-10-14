@@ -54,6 +54,8 @@ export interface ClusterPolicyRef {
   name: string;
   /** Resource version, for display only — apply is server-side. */
   resourceVersion?: string;
+  /** Managed by Fleet/Helm — deletion may be silently undone by re-creation. */
+  managed?: boolean;
 }
 
 export class ClusterApiError extends Error {
@@ -67,15 +69,23 @@ export class ClusterApiError extends Error {
   }
 }
 
+/** Fallback message when the body holds nothing usable. Node fetch leaves
+ * statusText empty — spell out the code instead. */
+function statusFallback(res: Response): string {
+  return res.statusText || `HTTP ${res.status}`;
+}
+
+/** Read an error response once, deriving both reason and message. The body is
+ * consumable only once, so everything shares this single read. */
 async function parseStatus(res: Response): Promise<never> {
   let reason = 'Unknown';
-  let message = res.statusText;
+  let message = statusFallback(res);
   try {
     const body = (await res.json()) as { reason?: string; message?: string };
-    reason = body.reason ?? reason;
-    message = body.message ?? message;
+    if (body.reason) reason = body.reason;
+    if (body.message) message = body.message;
   } catch {
-    // Non-JSON error body — keep statusText.
+    // Non-JSON error body — keep the fallback.
   }
   throw new ClusterApiError(res.status, reason, message);
 }
@@ -97,6 +107,28 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
+/** Fleet/Helm mark a policy managed via these label/annotation prefixes;
+ * deleting a managed policy tends to be silently undone by re-creation.
+ * Helm 3 stamps `meta.helm.sh/release-*` annotations and the
+ * `app.kubernetes.io/managed-by: Helm` label (not `helm.sh/*` — that
+ * prefix only appears on hook resources). */
+const MANAGED_PREFIXES = ['fleet.cattle.io/', 'helm.sh/', 'meta.helm.sh/'];
+const MANAGED_LABEL_VALUES: Array<{ key: string; value: string }> = [
+  { key: 'app.kubernetes.io/managed-by', value: 'Helm' },
+];
+
+export function isManagedPolicy(item: Record<string, unknown>): boolean {
+  const meta = (item.metadata ?? {}) as Record<string, unknown>;
+  const bags = [meta.labels, meta.annotations].map(b => (b ?? {}) as Record<string, string>);
+  for (const bag of bags) {
+    for (const key of Object.keys(bag)) {
+      if (MANAGED_PREFIXES.some(p => key.startsWith(p))) return true;
+    }
+  }
+  const labels = (meta.labels ?? {}) as Record<string, string>;
+  return MANAGED_LABEL_VALUES.some(m => labels[m.key] === m.value);
+}
+
 /** List every network policy in the cluster, both kinds, minimal fields. */
 export async function listClusterPolicies(): Promise<ClusterPolicyRef[]> {
   const [np, cnp] = await Promise.all([
@@ -106,11 +138,21 @@ export async function listClusterPolicies(): Promise<ClusterPolicyRef[]> {
   const refs: ClusterPolicyRef[] = [];
   for (const item of ((np as { items?: unknown[] }).items ?? []) as Array<Record<string, unknown>>) {
     const meta = (item.metadata ?? {}) as Record<string, string>;
-    refs.push({ kind: 'NetworkPolicy', namespace: meta.namespace ?? '', name: meta.name ?? '' });
+    refs.push({
+      kind: 'NetworkPolicy',
+      namespace: meta.namespace ?? '',
+      name: meta.name ?? '',
+      managed: isManagedPolicy(item) || undefined,
+    });
   }
   for (const item of ((cnp as { items?: unknown[] }).items ?? []) as Array<Record<string, unknown>>) {
     const meta = (item.metadata ?? {}) as Record<string, string>;
-    refs.push({ kind: 'CiliumNetworkPolicy', namespace: meta.namespace ?? '', name: meta.name ?? '' });
+    refs.push({
+      kind: 'CiliumNetworkPolicy',
+      namespace: meta.namespace ?? '',
+      name: meta.name ?? '',
+      managed: isManagedPolicy(item) || undefined,
+    });
   }
   return refs;
 }
@@ -202,14 +244,56 @@ async function applyOne(
   docYaml: string,
   force: boolean,
 ): Promise<void> {
-  const path =
-    ref.kind === 'NetworkPolicy'
-      ? `apis/networking.k8s.io/v1/namespaces/${ref.namespace}/networkpolicies/${ref.name}`
-      : `apis/cilium.io/v2/namespaces/${ref.namespace}/ciliumnetworkpolicies/${ref.name}`;
-  const res = await fetch(`/k8s/${path}?fieldManager=netpol-editor&force=${force}`, {
+  const res = await fetch(`/k8s/${resourcePath(ref)}?fieldManager=netpol-editor&force=${force}`, {
     method: 'PATCH',
     headers: devHeaders({ 'content-type': 'application/apply-patch+yaml' }),
     body: docYaml,
   });
   if (!res.ok) await parseStatus(res);
+}
+
+/** Namespaced resource path of a policy ref, in the apiserver's own spelling. */
+function resourcePath(ref: Pick<ClusterPolicyRef, 'kind' | 'namespace' | 'name'>): string {
+  return ref.kind === 'NetworkPolicy'
+    ? `apis/networking.k8s.io/v1/namespaces/${ref.namespace}/networkpolicies/${ref.name}`
+    : `apis/cilium.io/v2/namespaces/${ref.namespace}/ciliumnetworkpolicies/${ref.name}`;
+}
+
+/** Outcome of a best-effort batch delete. */
+export interface DeleteReport {
+  deleted: number;
+  failed: Array<{ ref: ClusterPolicyRef; message: string }>;
+}
+
+/**
+ * Delete each ref, sequentially and best-effort: 404 counts as deleted
+ * (already gone), any other failure is captured into the report and the
+ * remaining deletes still run.
+ */
+export async function deleteClusterPolicies(refs: ClusterPolicyRef[]): Promise<DeleteReport> {
+  const report: DeleteReport = { deleted: 0, failed: [] };
+  for (const ref of refs) {
+    const res = await fetch(`/k8s/${resourcePath(ref)}`, {
+      method: 'DELETE',
+      headers: devHeaders(),
+    }).catch(() => undefined);
+    if (!res) {
+      report.failed.push({ ref, message: 'network error' });
+      continue;
+    }
+    if (res.ok || res.status === 404) {
+      report.deleted += 1;
+      continue;
+    }
+    // Same single-read error extraction as every other failure path.
+    let message = statusFallback(res);
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body.message) message = body.message;
+    } catch {
+      // Non-JSON body — keep the fallback.
+    }
+    report.failed.push({ ref, message });
+  }
+  return report;
 }

@@ -284,6 +284,21 @@ export const zh = {
   'cluster-namespace-filter': '命名空间…',
   'cluster-search': '搜索…',
   'cluster-load-error': '加载集群策略失败',
-  'cluster-apply-error': '应用到集群失败'
+  'cluster-apply-error': '应用到集群失败',
+  'cluster-select-row': '选择',
+  'cluster-delete': '删除',
+  'cluster-delete-selected': '删除所选',
+  'cluster-delete-one-title': '从集群删除',
+  'cluster-delete-bulk-title': '从集群删除策略',
+  'cluster-delete-confirm': '删除',
+  'cluster-delete-deleting': '删除中…',
+  'cluster-delete-open-tabs': '该策略正在 {{n}} 个页签中编辑 —— 页签会保留。',
+  'cluster-delete-open-tabs-bulk': '其中 {{n}} 条策略正在页签中编辑 —— 页签会保留。',
+  'cluster-delete-managed-row': 'Fleet/Helm 管理',
+  'cluster-delete-managed-note': '带标记的策略由 Fleet 或 Helm 管理，删除后可能被自动重建。',
+  'cluster-delete-result-title': '删除完成',
+  'cluster-delete-result-summary': '已删除 {{deleted}} 条，失败 {{failed}} 条',
+  'cluster-delete-result-failed-heading': '失败',
+
 
 } satisfies Record<keyof typeof en, string>;

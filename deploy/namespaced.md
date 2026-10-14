@@ -18,10 +18,10 @@ metadata:
 rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
-    verbs: ["get", "list", "patch", "create"]
+    verbs: ["get", "list", "patch", "create", "delete"]
   - apiGroups: ["cilium.io"]
     resources: ["ciliumnetworkpolicies"]
-    verbs: ["get", "list", "patch", "create"]
+    verbs: ["get", "list", "patch", "create", "delete"]
   # Template labels of workloads feed the label pickers ("from cluster").
   # Namespace-scoped resources: listable inside this Role's namespace only.
   - apiGroups: ["apps"]

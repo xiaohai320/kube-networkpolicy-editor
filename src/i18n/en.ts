@@ -286,6 +286,21 @@ export const en = {
   'cluster-namespace-filter': 'Namespace…',
   'cluster-search': 'Search…',
   'cluster-load-error': 'Failed to load cluster policies',
-  'cluster-apply-error': 'Failed to apply to cluster'
+  'cluster-apply-error': 'Failed to apply to cluster',
+  'cluster-select-row': 'Select',
+  'cluster-delete': 'Delete',
+  'cluster-delete-selected': 'Delete selected',
+  'cluster-delete-one-title': 'Delete from cluster',
+  'cluster-delete-bulk-title': 'Delete policies from cluster',
+  'cluster-delete-confirm': 'Delete',
+  'cluster-delete-deleting': 'Deleting…',
+  'cluster-delete-open-tabs': 'This policy is open in {{n}} tab(s) — the tab is kept.',
+  'cluster-delete-open-tabs-bulk': '{{n}} of these policies are open in editor tab(s) — the tabs are kept.',
+  'cluster-delete-managed-row': 'Fleet/Helm managed',
+  'cluster-delete-managed-note': 'Flagged policies are managed by Fleet or Helm and may be recreated automatically after deletion.',
+  'cluster-delete-result-title': 'Deletion complete',
+  'cluster-delete-result-summary': '{{deleted}} deleted, {{failed}} failed',
+  'cluster-delete-result-failed-heading': 'Failed',
+
 
 } as const;

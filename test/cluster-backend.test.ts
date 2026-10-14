@@ -108,6 +108,20 @@ describe('cluster proxy app', () => {
     expect(await bodyOf(call.init)).toBe(body);
   });
 
+  it('forwards DELETE verbatim (delete-from-cluster pins the passthrough contract)', async () => {
+    stubUpstream(new Response(null, { status: 204 }));
+    const res = await makeApp().request(
+      '/k8s/apis/networking.k8s.io/v1/namespaces/default/networkpolicies/old',
+      { method: 'DELETE' },
+    );
+    expect(res.status).toBe(204);
+    const call = upstreamCalls[0]!;
+    expect(call.init.method).toBe('DELETE');
+    expect(call.url).toBe(
+      `${API}/apis/networking.k8s.io/v1/namespaces/default/networkpolicies/old`,
+    );
+  });
+
   it('translates upstream 409 conflicts verbatim', async () => {
     stubUpstream(json({ kind: 'Status', reason: 'Conflict', message: 'conflict' }, 409));
     const res = await makeApp().request('/k8s/apis/networking.k8s.io/v1/networkpolicies', {

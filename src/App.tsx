@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PolicyProvider } from '@/state/context';
 import { VisualCanvas } from '@/components/canvas/VisualCanvas';
 import { DraggableDivider } from '@/components/ui/DraggableDivider';
@@ -147,6 +147,21 @@ function App() {
     setPages(prev => prev.map(p => (p.page.id === id ? { ...p, page: { ...p.page, label } } : p)));
   }, []);
 
+  // Identity-stable view of the open pages for the cluster panel's
+  // "open in N tabs" note — recomputed only when pages actually change,
+  // not on every editor keystroke (state lives in PolicyProvider, mirrored
+  // into pages only on page switch).
+  const openPages = useMemo(
+    () =>
+      pages.map(p => ({
+        kind: p.state.policy.format === 'cilium' ? 'CiliumNetworkPolicy' : 'NetworkPolicy',
+        namespace: p.state.policy.namespace,
+        name: p.state.policy.name,
+      })),
+    [pages],
+  );
+  const handleClusterClose = useCallback(() => setClusterOpen(false), []);
+
   const handleLoadFromCluster = useCallback(
     (yaml: string, label: string) => {
       const page = clusterLoadedPage(yaml, label);
@@ -216,7 +231,11 @@ function App() {
       {/* Main content: cluster panel pushes (not covers) the editor area */}
       <div className="flex flex-1 min-h-0">
         {clusterOpen && (
-          <ClusterPanel onLoadPolicy={handleLoadFromCluster} onClose={() => setClusterOpen(false)} />
+          <ClusterPanel
+            onLoadPolicy={handleLoadFromCluster}
+            openPages={openPages}
+            onClose={handleClusterClose}
+          />
         )}
         <PolicyProvider
           key={activeId}

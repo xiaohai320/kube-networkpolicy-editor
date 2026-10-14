@@ -4,6 +4,8 @@ import {
   RefreshCw,
   AlertCircle,
   Loader2,
+  Trash2,
+  AlertTriangle,
   X,
 } from 'lucide-react';
 import { useTranslation } from '@/i18n';
@@ -19,21 +21,26 @@ import {
 } from '@/lib/cluster-api';
 import { detectAndParse, PolicyParseError } from '@/lib/yaml-parser';
 import { BTN_TOOLBAR_TEXT } from '../ui/button';
+import { DeleteConfirmDialog } from './DeleteConfirmDialog';
+import { PolicyKindBadge } from './PolicyKindBadge';
 
 type LoadState = 'idle' | 'loading' | 'loaded' | 'error';
 
 interface ClusterPanelProps {
   /** Load a parsed policy into a new editor page. */
   onLoadPolicy: (yaml: string, label: string) => void;
+  /** The currently open editor pages, for the "open in N tabs" note. */
+  openPages: Array<{ kind: string; namespace: string; name: string }>;
   onClose: () => void;
 }
 
 /**
- * The cluster inventory side panel: connect (dev), list, and load policies
- * into editor pages. Applying lives with the YAML panel — this panel only
- * reads.
+ * The cluster inventory side panel: connect (dev), list, load policies into
+ * editor pages, and delete from the cluster. Applying lives with the YAML
+ * panel; deletion lives here because the inventory is the view of cluster
+ * state.
  */
-export function ClusterPanel({ onLoadPolicy, onClose }: ClusterPanelProps) {
+export function ClusterPanel({ onLoadPolicy, openPages, onClose }: ClusterPanelProps) {
   const { t } = useTranslation();
   const [creds, setCreds] = useState(loadDevCredentials);
   const [state, setState] = useState<LoadState>('idle');
@@ -41,6 +48,10 @@ export function ClusterPanel({ onLoadPolicy, onClose }: ClusterPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [nsFilter, setNsFilter] = useState('');
   const [search, setSearch] = useState('');
+  // Selected refs, as a set of inventory keys — scoped to the current list
+  // snapshot and cleared whenever the list reloads.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleteTargets, setDeleteTargets] = useState<ClusterPolicyRef[] | null>(null);
 
   const refresh = useCallback(async () => {
     setState('loading');
@@ -48,6 +59,7 @@ export function ClusterPanel({ onLoadPolicy, onClose }: ClusterPanelProps) {
     try {
       const refs = await listClusterPolicies();
       setPolicies(refs);
+      setSelected(new Set());
       setState('loaded');
     } catch (err) {
       if (err instanceof ClusterApiError && err.status === 401) {
@@ -88,6 +100,35 @@ export function ClusterPanel({ onLoadPolicy, onClose }: ClusterPanelProps) {
       }
     },
     [onLoadPolicy, t],
+  );
+
+  const openTabCount = useCallback(
+    (ref: ClusterPolicyRef) =>
+      openPages.filter(p => p.kind === ref.kind && p.namespace === ref.namespace && p.name === ref.name)
+        .length,
+    [openPages],
+  );
+
+  const toggleSelect = (key: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectedRefs = useMemo(
+    () => policies.filter(p => selected.has(`${p.kind}/${p.namespace}/${p.name}`)),
+    [policies, selected],
+  );
+
+  const handleDeleteDone = useCallback(
+    (deletedSomething: boolean) => {
+      setDeleteTargets(null);
+      if (deletedSomething) void refresh();
+    },
+    [refresh],
   );
 
   const namespaces = useMemo(
@@ -164,6 +205,20 @@ export function ClusterPanel({ onLoadPolicy, onClose }: ClusterPanelProps) {
 
       {state === 'loaded' && (
         <>
+          {selectedRefs.length > 0 && (
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider">
+              <span className="text-xs text-text-secondary">
+                {t('cluster-delete-selected')}: {selectedRefs.length}
+              </span>
+              <button
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-white bg-red-600 border border-red-600 hover:bg-red-500 transition-colors"
+                onClick={() => setDeleteTargets(selectedRefs)}
+              >
+                <Trash2 size={12} /> {t('cluster-delete')} ({selectedRefs.length})
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-1 px-3 py-2 border-b border-divider">
             <select
               value={nsFilter}
@@ -190,27 +245,58 @@ export function ClusterPanel({ onLoadPolicy, onClose }: ClusterPanelProps) {
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-xs text-text-secondary">{t('cluster-empty')}</div>
             ) : (
-              filtered.map(ref => (
-                <button
-                  key={`${ref.kind}/${ref.namespace}/${ref.name}`}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-card-bg/60 flex items-center gap-1.5"
-                  onClick={() => void handleLoad(ref)}
-                >
-                  <span
-                    className={`shrink-0 px-1 rounded text-[10px] font-mono ${
-                      ref.kind === 'CiliumNetworkPolicy'
-                        ? 'bg-orange-900/40 text-orange-300'
-                        : 'bg-blue-900/40 text-blue-300'
-                    }`}
+              filtered.map(ref => {
+                const key = `${ref.kind}/${ref.namespace}/${ref.name}`;
+                const checked = selected.has(key);
+                return (
+                  <div
+                    key={key}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-card-bg/60 flex items-center gap-1.5 ${checked ? 'bg-card-bg/60' : ''}`}
                   >
-                    {ref.kind === 'CiliumNetworkPolicy' ? 'CNP' : 'NP'}
-                  </span>
-                  <span className="text-text-secondary shrink-0">{ref.namespace}</span>
-                  <span className="truncate text-text-primary">{ref.name}</span>
-                </button>
-              ))
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSelect(key)}
+                      aria-label={`${t('cluster-select-row')}: ${ref.namespace}/${ref.name}`}
+                      className="shrink-0 accent-[var(--theme-accent)] cursor-pointer"
+                    />
+                    <button
+                      className="flex-1 min-w-0 text-left flex items-center gap-1.5"
+                      onClick={() => void handleLoad(ref)}
+                    >
+                      <PolicyKindBadge kind={ref.kind} />
+                      <span className="text-text-secondary shrink-0">{ref.namespace}</span>
+                      <span className="truncate text-text-primary">{ref.name}</span>
+                    </button>
+                    {ref.managed && (
+                      <span
+                        className="shrink-0 text-yellow-500"
+                        title={t('cluster-delete-managed-note')}
+                        aria-label={t('cluster-delete-managed-row')}
+                      >
+                        <AlertTriangle size={12} />
+                      </span>
+                    )}
+                    <button
+                      className="shrink-0 p-0.5 rounded text-text-secondary hover:text-red-400 transition-colors"
+                      onClick={() => setDeleteTargets([ref])}
+                      aria-label={`${t('cluster-delete')}: ${ref.namespace}/${ref.name}`}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
+
+          {deleteTargets !== null && (
+            <DeleteConfirmDialog
+              refs={deleteTargets}
+              openTabCount={openTabCount}
+              onClose={handleDeleteDone}
+            />
+          )}
         </>
       )}
     </aside>

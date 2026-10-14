@@ -118,6 +118,11 @@ export function createClusterProxyApp(config: AppConfig): Hono {
       const v = upstreamRes.headers.get(name);
       if (v) resHeaders.set(name, v);
     }
+    // Body-less statuses (204 for DELETE, 304) reject a body in the Response
+    // constructor — pass them through without re-reading the body.
+    if (upstreamRes.status === 204 || upstreamRes.status === 304) {
+      return new Response(null, { status: upstreamRes.status, headers: resHeaders });
+    }
     const resBody = await upstreamRes.arrayBuffer();
     return new Response(resBody, { status: upstreamRes.status, headers: resHeaders });
   });
