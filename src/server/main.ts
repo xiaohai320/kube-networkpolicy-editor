@@ -1,4 +1,4 @@
-import { fetch as undiciFetch } from 'undici';
+import { Agent, fetch as undiciFetch } from 'undici';
 import { startServer, type AppConfig } from './app';
 import type { AuthDeps } from './auth';
 
@@ -25,6 +25,11 @@ async function main() {
 
   // Pin the in-cluster CA so the proxy verifies the apiserver identity.
   const ca = await readFile(`${saDir}/ca.crt`, 'utf8').catch(() => undefined);
+  // One CA-pinning dispatcher for the process: the proxy and the auth env
+  // self-patch share it (undici pools connections behind the Agent).
+  const apiserverDispatcher = ca
+    ? new Agent({ connect: { ca } })
+    : undefined;
 
   // Auth: built-in admin + OIDC allowlist. Admin changes PATCH this
   // Deployment's env, so pass its coordinates for the self-patch.
@@ -71,8 +76,19 @@ async function main() {
       ? {
           auth: {
             ...auth,
-            // Same-undici rule as the proxy: fetch and dispatcher from one copy.
-            apiFetch: ca ? (undiciFetch as unknown as typeof globalThis.fetch) : undefined,
+            // Same-undici rule as the proxy: fetch and dispatcher from one
+            // copy. The dispatcher pins the in-cluster CA — without it the
+            // self-patch fails TLS verification against the private CA.
+            ...(ca && apiserverDispatcher
+              ? {
+                  apiFetch: ((url: string | URL | Request, init?: RequestInit) =>
+                    undiciFetch(url as never, {
+                      ...(init ?? {}),
+                      dispatcher: apiserverDispatcher,
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    } as any)) as unknown as typeof globalThis.fetch,
+                }
+              : {}),
           },
         }
       : {}),
