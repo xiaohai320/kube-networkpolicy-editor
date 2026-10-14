@@ -1,0 +1,25 @@
+# Bootstrap the admin-settings objects the editor persists to (ADR-0003).
+# Apply once as an operator — fill in the real values first:
+#   kubectl apply -f deploy/settings.yaml
+# The editor's ServiceAccount only holds get/patch on these two resourceNames
+# (RBAC cannot scope create by resourceName), so creation is not left to the
+# app. The editor merges into whatever values are here; these initial values
+# mirror the Deployment env bootstrap and are replaced on first save.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: netpol-editor-settings
+  namespace: netpol-editor
+data:
+  # Comma-separated OIDC usernames; matches the ALLOWED_USERS env bootstrap.
+  allowedUsers: ""
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netpol-editor-settings
+  namespace: netpol-editor
+type: Opaque
+stringData:
+  # Must match ADMIN_PASSWORD env until the admin changes it in the UI.
+  adminPassword: "CHANGE_ME"

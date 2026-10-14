@@ -16,11 +16,14 @@ rules:
   # Admin settings persist to this one ConfigMap (allowlist) + Secret
   # (password). Env self-patch was rejected: env is pod-template state and
   # rolling the pod on every save logged every user out.
+  # The objects are created once by the operator (kubectl apply -f
+  # deploy/settings.yaml); the app only needs get/patch — RBAC cannot scope
+  # create by resourceName, so the app holds no create at all.
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["netpol-editor-settings"]
-    verbs: ["get", "create", "patch"]
+    verbs: ["get", "patch"]
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["netpol-editor-settings"]
-    verbs: ["get", "create", "patch"]
+    verbs: ["get", "patch"]
