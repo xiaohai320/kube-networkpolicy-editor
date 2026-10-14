@@ -173,7 +173,10 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
     body?: string,
   ): Promise<{ ok: boolean; notFound: boolean; status?: number; data?: Record<string, string> }> => {
     if (!deps.settings) return { ok: false, notFound: true };
-    const url = `${deps.apiServer}/api/v1/namespaces/${deps.settings.namespace}/${kind}/${deps.settings[kind === 'configmaps' ? 'configMap' : 'secret']}`;
+    const name = deps.settings[kind === 'configmaps' ? 'configMap' : 'secret'];
+    // POST (create) targets the collection URL — the apiserver answers 405 on
+    // object URLs; GET/PATCH address the object itself.
+    const url = `${deps.apiServer}/api/v1/namespaces/${deps.settings.namespace}/${kind}${method === 'POST' ? '' : `/${name}`}`;
     try {
       const res = await apiFetch()(url, {
         method,

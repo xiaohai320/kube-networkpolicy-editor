@@ -198,7 +198,10 @@ describe('settings persistence', () => {
       const url = String(input);
       calls.push({ method: init.method ?? 'GET', url, body: typeof init.body === 'string' ? init.body : undefined });
       if (init.method === 'POST') {
-        objects[`GET ${url}`] = { status: 201, body: init.body as string };
+        // A POST to the collection url makes the object GET-able at the
+        // object url (strip the collection suffix).
+        const objectUrl = url.replace(/\/(configmaps|secrets)$/, (_, kind) => `/${kind}/netpol-editor-settings`);
+        objects[`GET ${objectUrl}`] = { status: 201, body: init.body as string };
         return new Response(init.body as string, { status: 201 });
       }
       const hit = objects[`${init.method ?? 'GET'} ${url}`];
@@ -220,9 +223,11 @@ describe('settings persistence', () => {
     expect(add.status).toBe(200);
     expect((await add.json()).warning).toBeNull();
 
-    // First save: nothing existed, so the allowlist lands as a CREATE...
+    // First save: nothing existed, so the allowlist lands as a CREATE — the
+    // POST goes to the COLLECTION url (the apiserver 405s object-url POSTs).
     const createCall = calls.find(c => c.method === 'POST' && c.url.includes('configmaps'));
     expect(createCall).toBeDefined();
+    expect(createCall!.url.endsWith('/api/v1/namespaces/netpol-editor/configmaps')).toBe(true);
     expect(JSON.parse(createCall!.body!)).toMatchObject({
       metadata: { name: 'netpol-editor-settings', namespace: 'netpol-editor' },
       data: { allowedUsers: 'jdoe' },
