@@ -13,8 +13,14 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
     verbs: ["list"]
-  # Admin settings (password, allowlist) persist as env on this one Deployment.
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    resourceNames: ["netpol-editor"]
-    verbs: ["get", "patch"]
+  # Admin settings persist to this one ConfigMap (allowlist) + Secret
+  # (password). Env self-patch was rejected: env is pod-template state and
+  # rolling the pod on every save logged every user out.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["netpol-editor-settings"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["netpol-editor-settings"]
+    verbs: ["get", "create", "patch"]

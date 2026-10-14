@@ -9,10 +9,12 @@ import { Agent, fetch as undiciFetch } from 'undici';
  * the admin maintains. Sessions are httpOnly-cookie tokens in process memory
  * (single-replica deployment; a restart logs everyone out — accepted).
  *
- * Persistence of admin-changed settings: the container's env is read-only, so
- * changes PATCH the editor's own Deployment env (strategic merge on the env
- * array) — the running process updates memory immediately and the pod keeps
- * the value across restarts. RBAC restricts that patch to this one resource.
+ * Persistence of admin-changed settings: a ConfigMap (allowlist) + Secret
+ * (password) in the editor's namespace, read at startup and merge-patched on
+ * change. Env vars are only the bootstrap values — settings objects, when
+ * present, win. Deliberately not the Deployment env: env is pod-template
+ * state, so writing it rolls the pod and logs every user out (that behavior
+ * shipped once and was treated as a bug).
  *
  * OIDC TLS: the IdP sits behind a privately-signed cert, so per the operator's
  * explicit requirement its discovery/token fetches skip certificate
@@ -33,13 +35,17 @@ export interface AuthDeps {
   };
   /** Where the editor should redirect after OIDC auth (redirect_uri origin). */
   publicOrigin?: string;
-  /** Apiserver access for persisting changed env vars back to the Deployment. */
+  /** Apiserver access for persisting changed settings back to the cluster. */
   apiServer: string;
   token: string;
   /** Apiserver fetch with CA pinning; tests stub this, production passes the
    * undici fetch wired to the apiserver dispatcher. */
   apiFetch?: typeof globalThis.fetch;
-  deployment?: { namespace: string; name: string; container: string };
+  /** Where admin settings persist: a ConfigMap (allowlist) + Secret
+   * (password) in the same namespace. Absent → persistence degrades to a
+   * warning. Deliberately NOT the Deployment env: env changes are pod
+   * template changes, and rolling the pod on every save logs every user out. */
+  settings?: { namespace: string; configMap: string; secret: string };
 }
 
 export interface Session {
@@ -97,13 +103,24 @@ interface AuthRoutes {
   hasSession: (cookieHeader: string | undefined) => boolean;
 }
 
+/** Settings payloads live under `.data` (ConfigMap string map / Secret
+ * base64 map); everything else about the object is irrelevant here. */
+function resDataOf(obj: unknown): Record<string, string> | undefined {
+  const data = (obj as { data?: Record<string, string> } | null)?.data;
+  return data && typeof data === 'object' ? data : undefined;
+}
+
 export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
   const sessions = new Map<string, Session>();
   const allowed = new Set(deps.allowedUsers);
   let adminPassword = deps.adminPassword;
   let persistWarning: string | null = null;
 
-  const apiFetch = deps.apiFetch ?? globalThis.fetch;
+  // Resolved per call: tests stub global fetch after makeApp (same rule as
+  // upstreamFetch / idpFetch below).
+  const apiFetch: () => typeof globalThis.fetch = deps.apiFetch
+    ? () => deps.apiFetch!
+    : () => globalThis.fetch;
 
   const insecure = deps.oidc?.insecureTls !== false;
   const oidcDispatcher = insecure
@@ -148,33 +165,97 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
     await next();
   };
 
-  /** PATCH the editor Deployment's env so admin changes survive restarts. */
-  const persistEnv = async (vars: Record<string, string>): Promise<void> => {
-    if (!deps.deployment) {
+  /** GET, create, or merge-patch one settings object; true on any success
+   * (404 counts as "absent", not a failure — callers create it). */
+  const settingsCall = async (
+    kind: 'configmaps' | 'secrets',
+    method: 'GET' | 'POST' | 'PATCH',
+    body?: string,
+  ): Promise<{ ok: boolean; notFound: boolean; status?: number; data?: Record<string, string> }> => {
+    if (!deps.settings) return { ok: false, notFound: true };
+    const url = `${deps.apiServer}/api/v1/namespaces/${deps.settings.namespace}/${kind}/${deps.settings[kind === 'configmaps' ? 'configMap' : 'secret']}`;
+    try {
+      const res = await apiFetch()(url, {
+        method,
+        ...(body
+          ? {
+              headers: {
+                authorization: `Bearer ${deps.token}`,
+                'content-type': method === 'POST'
+                  ? 'application/json'
+                  : 'application/strategic-merge-patch+json',
+              },
+              body,
+            }
+          : { headers: { authorization: `Bearer ${deps.token}` } }),
+      });
+      if (res.ok) return { ok: true, notFound: false, data: resDataOf(await res.json().catch(() => null)) };
+      if (res.status === 404) return { ok: true, notFound: true };
+      console.error(`settings ${method} ${kind} failed:`, res.status, await res.text().catch(() => ''));
+      return { ok: false, notFound: false, status: res.status };
+    } catch (err) {
+      console.error(`settings ${method} ${kind} error:`, err);
+      return { ok: false, notFound: false };
+    }
+  };
+
+  // Strategic-merge PATCH does not create, so first save probes with GET and
+  // POSTs a full object when the ConfigMap/Secret isn't there yet. Returns
+  // null on success, else the warning string to surface.
+  const settingsWrite = async (
+    kind: 'configmaps' | 'secrets',
+    data: Record<string, string>,
+  ): Promise<string | null> => {
+    const existing = await settingsCall(kind, 'GET');
+    if (existing.notFound) {
+      const manifest = kind === 'configmaps'
+        ? { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: deps.settings!.configMap, namespace: deps.settings!.namespace }, data }
+        : { apiVersion: 'v1', kind: 'Secret', metadata: { name: deps.settings!.secret, namespace: deps.settings!.namespace }, type: 'Opaque', data };
+      const created = await settingsCall(kind, 'POST', JSON.stringify(manifest));
+      return created.ok ? null : `persist-failed-${created.status ?? 'error'}`;
+    }
+    if (!existing.ok) return `persist-failed-${existing.status ?? 'error'}`;
+    const patched = await settingsCall(kind, 'PATCH', JSON.stringify({ data }));
+    return patched.ok ? null : `persist-failed-${patched.status ?? 'error'}`;
+  };
+
+  // Startup load is awaited lazily on the first admin/OIDC request — firing
+  // it un-awaited races the request handlers in tests and at boot.
+  let loaded: Promise<void> | null = null;
+  const ensureLoaded = (): Promise<void> =>
+    (loaded ??= (async () => {
+      const res = await settingsCall('configmaps', 'GET');
+      if (res.ok && !res.notFound && res.data?.allowedUsers) {
+        for (const u of res.data.allowedUsers.split(',').map(s => s.trim()).filter(Boolean)) allowed.add(u);
+      }
+      // The password lives beside it in the Secret; a stored one wins over env.
+      const pw = await settingsCall('secrets', 'GET');
+      const stored = pw.data?.adminPassword;
+      if (pw.ok && !pw.notFound && stored) {
+        try {
+          adminPassword = atob(stored);
+        } catch {
+          console.error('stored adminPassword is not valid base64; keeping env value');
+        }
+      }
+    })());
+
+  /** Persist allowlist changes; the running process updates memory first and
+   * a failure only surfaces as a warning (never blocks the request). */
+  const persistAllowed = async (): Promise<void> => {
+    if (!deps.settings) {
       persistWarning = 'persist-unconfigured';
       return;
     }
-    const url = `${deps.apiServer}/apis/apps/v1/namespaces/${deps.deployment.namespace}/deployments/${deps.deployment.name}`;
-    const container = { name: deps.deployment.container, env: Object.entries(vars).map(([name, value]) => ({ name, value })) };
-    try {
-      const res = await apiFetch(url, {
-        method: 'PATCH',
-        headers: {
-          authorization: `Bearer ${deps.token}`,
-          'content-type': 'application/strategic-merge-patch+json',
-        },
-        body: JSON.stringify({ spec: { template: { spec: { containers: [container] } } } }),
-      });
-      if (!res.ok) {
-        persistWarning = `persist-failed-${res.status}`;
-        console.error('env persistence failed:', res.status, await res.text().catch(() => ''));
-      } else {
-        persistWarning = null;
-      }
-    } catch (err) {
-      persistWarning = 'persist-failed';
-      console.error('env persistence error:', err);
+    persistWarning = await settingsWrite('configmaps', { allowedUsers: [...allowed].sort().join(',') });
+  };
+
+  const persistPassword = async (password: string): Promise<void> => {
+    if (!deps.settings) {
+      persistWarning = 'persist-unconfigured';
+      return;
     }
+    persistWarning = await settingsWrite('secrets', { adminPassword: btoa(password) });
   };
 
   const routes = new Hono();
@@ -204,35 +285,39 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
 
   // ── Admin: allowlist + password ──────────────────────────────────────────
 
-  routes.get('/auth/users', requireAdmin, c =>
-    c.json({ users: [...allowed].sort() }),
-  );
+  routes.get('/auth/users', requireAdmin, async c => {
+    await ensureLoaded();
+    return c.json({ users: [...allowed].sort() });
+  });
 
   routes.post('/auth/users', async c => {
+    await ensureLoaded();
     const body = (await c.req.json().catch(() => ({}))) as { username?: string };
     const username = body.username?.trim();
     if (!username) return c.json({ error: 'invalid-username' }, 400);
     if (allowed.has(username)) return c.json({ users: [...allowed].sort() });
     allowed.add(username);
-    await persistEnv({ ALLOWED_USERS: [...allowed].join(',') });
+    await persistAllowed();
     return c.json({ users: [...allowed].sort(), warning: persistWarning });
   });
 
   routes.delete('/auth/users/:username', async c => {
+    await ensureLoaded();
     const username = c.req.param('username');
     allowed.delete(username);
-    await persistEnv({ ALLOWED_USERS: [...allowed].join(',') });
+    await persistAllowed();
     return c.json({ users: [...allowed].sort(), warning: persistWarning });
   });
 
   routes.post('/auth/password', async c => {
+    await ensureLoaded();
     const body = (await c.req.json().catch(() => ({}))) as { current?: string; next?: string };
     if (!body.current || !passwordMatches(body.current, adminPassword)) {
       return c.json({ error: 'invalid-credentials' }, 401);
     }
     if (!body.next || body.next.length < 8) return c.json({ error: 'weak-password' }, 400);
     adminPassword = body.next;
-    await persistEnv({ ADMIN_PASSWORD: adminPassword });
+    await persistPassword(adminPassword);
     return c.json({ ok: true, warning: persistWarning });
   });
 
@@ -327,6 +412,7 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
       (typeof claims.sub === 'string' && claims.sub) ||
       '';
     if (!username) return c.json({ error: 'no-username' }, 502);
+    await ensureLoaded();
     if (!allowed.has(username)) {
       // The admin decides who may sign in; everyone else is turned away here.
       return c.json({ error: 'not-allowed', user: username }, 403);

@@ -31,12 +31,16 @@ async function main() {
     ? new Agent({ connect: { ca } })
     : undefined;
 
-  // Auth: built-in admin + OIDC allowlist. Admin changes PATCH this
-  // Deployment's env, so pass its coordinates for the self-patch.
+  // Auth: built-in admin + OIDC allowlist. Admin changes persist to a
+  // ConfigMap/Secret (never the Deployment env — env changes are pod-template
+  // changes and roll the pod, logging everyone out).
   const adminUsername = process.env.ADMIN_USERNAME ?? 'admin';
   const adminPassword = process.env.ADMIN_PASSWORD;
   const allowedUsers = (process.env.ALLOWED_USERS ?? '')
     .split(',').map(s => s.trim()).filter(Boolean);
+  const settingsNamespace =
+    process.env.POD_NAMESPACE ??
+    (await readFile(`${saDir}/namespace`, 'utf8').catch(() => 'default')).trim();
   const oidcIssuer = process.env.OIDC_ISSUER;
   const auth: AuthDeps | null = adminPassword
     ? {
@@ -45,12 +49,10 @@ async function main() {
         allowedUsers,
         apiServer: host,
         token: token.trim(),
-        deployment: {
-          namespace:
-            process.env.POD_NAMESPACE ??
-            (await readFile(`${saDir}/namespace`, 'utf8').catch(() => 'default')).trim(),
-          name: process.env.POD_DEPLOYMENT_NAME ?? 'netpol-editor',
-          container: 'editor',
+        settings: {
+          namespace: settingsNamespace,
+          configMap: 'netpol-editor-settings',
+          secret: 'netpol-editor-settings',
         },
         ...(oidcIssuer
           ? {

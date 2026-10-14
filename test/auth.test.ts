@@ -11,7 +11,7 @@ import { createClusterProxyApp } from '@/server/app';
 const ADMIN = 'admin';
 const PASSWORD = 'secret-pw-123';
 
-function makeApp(opts: { allowed?: string[]; oidc?: boolean } = {}) {
+function makeApp(opts: { allowed?: string[]; oidc?: boolean; persist?: boolean } = {}) {
   return createClusterProxyApp({
     apiServer: 'https://apiserver.example:6443',
     token: 'sa-token',
@@ -22,7 +22,16 @@ function makeApp(opts: { allowed?: string[]; oidc?: boolean } = {}) {
       allowedUsers: opts.allowed ?? [],
       apiServer: 'https://apiserver.example:6443',
       token: 'sa-token',
-      // No deployment coordinates: persistence degrades to a warning.
+      // No settings coordinates unless asked: persistence degrades to a warning.
+      ...(opts.persist
+        ? {
+            settings: {
+              namespace: 'netpol-editor',
+              configMap: 'netpol-editor-settings',
+              secret: 'netpol-editor-settings',
+            },
+          }
+        : {}),
       ...(opts.oidc
         ? {
             oidc: {
@@ -166,5 +175,146 @@ describe('local admin login', () => {
       body: JSON.stringify({ username: ADMIN, password: 'new-pw-456789' }),
     });
     expect(newLogin.status).toBe(200);
+  });
+});
+
+describe('settings persistence', () => {
+  /**
+   * Admin settings live in a ConfigMap (allowlist) + Secret (password) so a
+   * change does NOT touch the pod template — the old env self-patch rolled
+   * the pod on every save and logged everyone out. Stub the upstream fetch
+   * and record calls; the apiserver is never actually hit.
+   */
+  interface Call { method: string; url: string; body?: string }
+  let calls: Call[];
+
+  const urlOf = (kind: 'configmaps' | 'secrets') =>
+    `https://apiserver.example:6443/api/v1/namespaces/netpol-editor/${kind}/netpol-editor-settings`;
+
+  function stub() {
+    const objects: Record<string, { status: number; body: string }> = {};
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      calls.push({ method: init.method ?? 'GET', url, body: typeof init.body === 'string' ? init.body : undefined });
+      if (init.method === 'POST') {
+        objects[`GET ${url}`] = { status: 201, body: init.body as string };
+        return new Response(init.body as string, { status: 201 });
+      }
+      const hit = objects[`${init.method ?? 'GET'} ${url}`];
+      return new Response(hit?.body ?? 'not found', { status: hit ? 200 : 404 });
+    }));
+    return objects;
+  }
+
+  it('creates the settings ConfigMap on first save and patches it after', async () => {
+    stub();
+    const app = makeApp({ persist: true });
+    const cookie = await loginCookie(app);
+
+    const add = await app.request('/auth/users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ username: 'jdoe' }),
+    });
+    expect(add.status).toBe(200);
+    expect((await add.json()).warning).toBeNull();
+
+    // First save: nothing existed, so the allowlist lands as a CREATE...
+    const createCall = calls.find(c => c.method === 'POST' && c.url.includes('configmaps'));
+    expect(createCall).toBeDefined();
+    expect(JSON.parse(createCall!.body!)).toMatchObject({
+      metadata: { name: 'netpol-editor-settings', namespace: 'netpol-editor' },
+      data: { allowedUsers: 'jdoe' },
+    });
+
+    // ...and the second save PATCHes instead of recreating.
+    await app.request('/auth/users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ username: 'second' }),
+    });
+    const patchCalls = calls.filter(c => c.method === 'PATCH' && c.url.includes('configmaps'));
+    expect(patchCalls).toHaveLength(1);
+    expect(JSON.parse(patchCalls[0]!.body!)).toMatchObject({ data: { allowedUsers: 'jdoe,second' } });
+  });
+
+  it('saves the password to the Secret, never to the ConfigMap', async () => {
+    stub();
+    const app = makeApp({ persist: true });
+    const cookie = await loginCookie(app);
+
+    const change = await app.request('/auth/password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ current: PASSWORD, next: 'new-pw-456789' }),
+    });
+    expect(change.status).toBe(200);
+
+    const secretCalls = calls.filter(c => c.url.includes('secrets'));
+    expect(secretCalls.length).toBeGreaterThan(0);
+    const secretWrite = secretCalls.find(c => c.method === 'POST' || c.method === 'PATCH');
+    // Secret data values are base64; the plaintext must not appear anywhere.
+    expect(secretWrite!.body).not.toContain('new-pw-456789');
+    expect(atob(JSON.parse(secretWrite!.body!).data.adminPassword)).toBe('new-pw-456789');
+    expect(calls.some(c => c.url.includes('configmaps') && (c.method === 'POST' || c.method === 'PATCH'))).toBe(false);
+  });
+
+  it('does not touch the pod template — no Deployment calls at all', async () => {
+    stub();
+    const app = makeApp({ persist: true });
+    const cookie = await loginCookie(app);
+
+    await app.request('/auth/users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ username: 'jdoe' }),
+    });
+    expect(calls.some(c => c.url.includes('deployments'))).toBe(false);
+  });
+
+  it('loads the allowlist from the ConfigMap at startup when present', async () => {
+    // The load happens lazily on first use — stub before building the app.
+    const objects = stub();
+    objects[`GET ${urlOf('configmaps')}`] = {
+      status: 200,
+      body: JSON.stringify({ data: { allowedUsers: 'jdoe,second' } }),
+    };
+    const app = makeApp({ persist: true });
+    const cookie = await loginCookie(app);
+
+    const res = await app.request('/auth/users', { headers: { cookie } });
+    expect((await res.json()).users).toEqual(['jdoe', 'second']);
+  });
+
+  it('falls back to env allowlist when the ConfigMap is absent', async () => {
+    stub();
+    const app = makeApp({ persist: true, allowed: ['env-user'] });
+    const cookie = await loginCookie(app);
+
+    const res = await app.request('/auth/users', { headers: { cookie } });
+    expect((await res.json()).users).toEqual(['env-user']);
+    // And a subsequent save CREATES the missing ConfigMap.
+    await app.request('/auth/users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ username: 'env-user2' }),
+    });
+    expect(calls.some(c => c.method === 'POST' && c.url.includes('configmaps'))).toBe(true);
+  });
+
+  it('reports a persist failure as a warning instead of failing the request', async () => {
+    stub();
+    const app = makeApp({ persist: true });
+    const cookie = await loginCookie(app);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('forbidden', { status: 403 })));
+
+    const res = await app.request('/auth/users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ username: 'jdoe' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).warning).toBe('persist-failed-403');
   });
 });
