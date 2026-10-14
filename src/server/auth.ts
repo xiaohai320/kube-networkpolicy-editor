@@ -57,6 +57,9 @@ function cookieHeader(name: string, value: string, maxAge: number): string {
   // Plain http via NodePort, so no Secure flag — it would break login.
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 }
+// NOTE: always emit through the `setCookie` wrapper below — Hono's bare
+// `c.header('set-cookie', …)` REPLACES the header, and joining several
+// cookies into one header makes browsers and curl reject the whole header.
 
 function readCookie(header: string | undefined, name: string): string | undefined {
   for (const part of header?.split(';') ?? []) {
@@ -64,6 +67,15 @@ function readCookie(header: string | undefined, name: string): string | undefine
     if (k === name) return v.join('=');
   }
   return undefined;
+}
+
+/**
+ * Hono's `c.header` REPLACES a header by default — two `set-cookie` calls
+ * without `{ append: true }` leave only the last cookie in the response.
+ * This wrapper keeps every cookie in its own header, never joined.
+ */
+function setCookie(c: { header: (name: string, value: string, options?: object) => void }, header: string): void {
+  c.header('set-cookie', header, { append: true });
 }
 
 /** Constant-time compare — the password rides in env, not in timing attacks. */
@@ -97,9 +109,14 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
   const oidcDispatcher = insecure
     ? new Agent({ connect: { rejectUnauthorized: false } })
     : undefined;
-  const idpFetch: typeof globalThis.fetch = insecure
-    ? (undiciFetch as unknown as typeof globalThis.fetch)
-    : globalThis.fetch;
+  // Insecure mode must use undici's fetch (the dispatcher's own copy — Node's
+  // global fetch rejects foreign Agents). Secure mode keeps globalThis.fetch,
+  // which is also what tests stub: undici's fetch would bypass the stub.
+  // Resolved per call, not captured at construction — same lazy-binding rule
+  // as the proxy's upstreamFetch (tests stub global fetch after makeApp).
+  const idpFetch: () => typeof globalThis.fetch = insecure
+    ? () => (undiciFetch as unknown as typeof globalThis.fetch)
+    : () => globalThis.fetch;
 
   const newSession = (user: string, role: Session['role']): string => {
     const token = randomBytes(32).toString('hex');
@@ -172,7 +189,7 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
     const body = (await c.req.json().catch(() => ({}))) as { username?: string; password?: string };
     if (body.username === deps.adminUsername && body.password && passwordMatches(body.password, adminPassword)) {
       const token = newSession(deps.adminUsername, 'admin');
-      c.header('set-cookie', cookieHeader(SESSION_COOKIE, token, SESSION_TTL / 1000));
+      setCookie(c, cookieHeader(SESSION_COOKIE, token, SESSION_TTL / 1000));
       return c.json({ authenticated: true, user: deps.adminUsername, role: 'admin' });
     }
     return c.json({ error: 'invalid-credentials' }, 401);
@@ -181,7 +198,7 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
   routes.post('/auth/logout', c => {
     const token = readCookie(c.req.header('cookie'), SESSION_COOKIE);
     if (token) sessions.delete(token);
-    c.header('set-cookie', cookieHeader(SESSION_COOKIE, '', 0));
+    setCookie(c, cookieHeader(SESSION_COOKIE, '', 0));
     return c.json({ ok: true });
   });
 
@@ -224,7 +241,7 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
   let discovery: { authorization: string; token: string } | null = null;
   const discover = async (): Promise<{ authorization: string; token: string }> => {
     if (discovery) return discovery;
-    const res = await idpFetch(`${deps.oidc!.issuer}/.well-known/openid-configuration`, {
+    const res = await idpFetch()(`${deps.oidc!.issuer}/.well-known/openid-configuration`, {
       dispatcher: oidcDispatcher,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
@@ -250,7 +267,9 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
     url.searchParams.set('scope', 'openid profile email');
     url.searchParams.set('state', state);
     url.searchParams.set('nonce', nonce);
-    c.header('set-cookie', `${cookieHeader(STATE_COOKIE, state, 600)}; ${cookieHeader(NONCE_COOKIE, nonce, 600)}`);
+    // Two separate Set-Cookie headers — never joined.
+    setCookie(c, cookieHeader(STATE_COOKIE, state, 600));
+    setCookie(c, cookieHeader(NONCE_COOKIE, nonce, 600));
     return c.redirect(url.toString());
   });
 
@@ -265,7 +284,7 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
 
     const origin = deps.publicOrigin ?? new URL(c.req.url).origin;
     const { token } = await discover();
-    const res = await idpFetch(token, {
+    const res = await idpFetch()(token, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -315,14 +334,10 @@ export function createAuthRoutes(deps: AuthDeps): AuthRoutes {
 
     const token2 = newSession(username, 'user');
     const maxAge = SESSION_TTL / 1000;
-    c.header(
-      'set-cookie',
-      [
-        cookieHeader(SESSION_COOKIE, token2, maxAge),
-        cookieHeader(STATE_COOKIE, '', 0),
-        cookieHeader(NONCE_COOKIE, '', 0),
-      ].join('; '),
-    );
+    // Each in its own Set-Cookie header (see setCookie note).
+    setCookie(c, cookieHeader(SESSION_COOKIE, token2, maxAge));
+    setCookie(c, cookieHeader(STATE_COOKIE, '', 0));
+    setCookie(c, cookieHeader(NONCE_COOKIE, '', 0));
     return c.redirect('/');
   });
 
