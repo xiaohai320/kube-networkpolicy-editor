@@ -89,9 +89,9 @@ export function RuleDialog({
   // block for `fixed` — dimming only the card instead of the viewport.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40"
       onClick={onClose}
-    >,
+    >
       <div
         role="dialog"
         aria-modal="true"
@@ -122,12 +122,12 @@ export function RuleDialog({
                       key={i}
                       disabled={opt.disabled}
                       onClick={() => handlePick(i)}
-                      className={`text-left rounded-md border px-2 py-1.5 transition-colors ${
+                      className={`text-left rounded-md px-2 py-1.5 transition-colors ${
                         opt.disabled
-                          ? 'border-card-border opacity-40 cursor-not-allowed'
+                          ? 'bg-surface opacity-40 cursor-not-allowed'
                           : active
-                            ? 'border-accent bg-accent/10'
-                            : 'border-card-border hover:border-accent/60 hover:bg-surface'
+                            ? 'bg-accent/15 shadow-[inset_0_0_0_1px_var(--theme-accent)]'
+                            : 'bg-surface hover:bg-accent/10'
                       }`}
                     >
                       <span className="flex items-center gap-1.5 min-w-0">

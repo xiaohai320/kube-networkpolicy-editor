@@ -16,6 +16,10 @@ export function buildFlowEdges(
   const mk = (direction: Direction, rule: Endpoint): Edge => ({
     id: edgeId(direction, rule.id),
     type: 'allow',
+    // RF stacks edges below nodes by default (both z-index 0, nodes later in
+    // DOM order) — cards sit between columns tight enough to bury the whole
+    // run, so the lines vanish. Draw edges above the cards.
+    zIndex: 100,
     ...(direction === 'ingress'
       ? {
           source: groupNodeId(direction, rule.group),

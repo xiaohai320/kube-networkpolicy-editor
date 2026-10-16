@@ -155,6 +155,17 @@ select:focus-visible {
   border-color: var(--theme-accent);
 }
 
+/* The browser's default black focus ring is heavy on the themed surfaces and
+   lands on every clicked button (mouse focus). Replace it: keyboard users
+   still get a visible ring, in the theme accent. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--theme-accent) 80%, transparent);
+  outline-offset: 1px;
+}
+
 /* The canvas washes a few points darker toward the bottom, as in the live
    editor. Derived from --theme-canvas so both themes pick it up unchanged. */
 .bg-canvas {
