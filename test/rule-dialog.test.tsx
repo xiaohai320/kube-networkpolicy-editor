@@ -1,6 +1,10 @@
 // @vitest-environment happy-dom
 
 import '@testing-library/jest-dom/vitest';
+// rf-polyfill is needed because these tests mount VisualCanvas, which is a
+// React Flow canvas since the rewrite — happy-dom's own geometry stubs break
+// RF's measuring pipeline even when only the dialog is being asserted.
+import './rf-polyfill';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import i18next from 'i18next';

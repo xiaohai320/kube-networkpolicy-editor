@@ -1,19 +1,9 @@
-import { IngressColumn } from './IngressColumn';
-import { TargetPodNode } from './TargetPodNode';
-import { EgressColumn } from './EgressColumn';
-import { ArrowLayer } from './ArrowLayer';
+import { FlowCanvas } from './flow/FlowCanvas';
 
+/**
+ * Thin shell kept so App.tsx's reference (and the tests that mount
+ * VisualCanvas) stay stable; the flow graph itself lives in flow/FlowCanvas.
+ */
 export function VisualCanvas() {
-  return (
-    <div className="relative flex items-center justify-center gap-12 p-6 h-full overflow-auto min-h-0">
-      <ArrowLayer />
-      <IngressColumn />
-
-      <div className="flex flex-col items-center shrink-0">
-        <TargetPodNode />
-      </div>
-
-      <EgressColumn />
-    </div>
-  );
+  return <FlowCanvas />;
 }

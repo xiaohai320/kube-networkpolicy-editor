@@ -243,9 +243,10 @@ function App() {
           onStateChange={handleStateChange}
         >
           <div className="flex flex-col flex-1 min-h-0">
-          {/* Visual Canvas */}
+          {/* Visual Canvas — React Flow manages its own pan/zoom viewport,
+              so no outer overflow scroll. */}
           <div
-            className="bg-canvas overflow-auto relative"
+            className="bg-canvas relative min-h-0"
             style={{ height: `${splitPercent}%` }}
           >
             <VisualCanvas />

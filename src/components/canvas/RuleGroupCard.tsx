@@ -21,6 +21,8 @@ interface RuleGroupCardProps {
   onUpdate: (id: string, changes: Partial<Endpoint>) => void;
   onDelete: (id: string) => void;
   duplicateIds: Set<string>;
+  /** Per-rule-row connector (flow mode): one per rule row, keyed by rule id. */
+  renderRowHandle?: (rule: Endpoint) => ReactNode;
 }
 
 type DialogState = { mode: 'add' } | { mode: 'edit'; rule: Endpoint } | null;
@@ -44,6 +46,7 @@ export function RuleGroupCard({
   onUpdate,
   onDelete,
   duplicateIds,
+  renderRowHandle,
 }: RuleGroupCardProps) {
   const { t, msg } = useTranslation();
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -61,7 +64,7 @@ export function RuleGroupCard({
         <button
           onClick={() => setDialog({ mode: 'add' })}
           aria-label={t('dialog-new-rule', { direction: dirLabel, group: title })}
-          className={BTN_ICON}
+          className={`${BTN_ICON} nodrag nopan`}
         >
           <Plus size={14} />
         </button>
@@ -79,16 +82,21 @@ export function RuleGroupCard({
             return (
               <div
                 key={rule.id}
-                className={isDuplicate ? 'bg-rating-2/10' : ''}
-                data-rule-id={rule.id}
-                data-direction={direction}
+                className={isDuplicate ? 'bg-rating-2/10 relative' : 'relative'}
               >
                 <div
-                  className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface/50 group"
+                  className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface/50 group nodrag nopan"
                   onMouseEnter={() => setHoveredRule(rule.id)}
                   onMouseLeave={() => setHoveredRule(null)}
                   onClick={() => setDialog({ mode: 'edit', rule })}
                 >
+                  {/* nodrag+nopan on the row: a press on a row must neither
+                      drag the card nor pan the pane, and mouseup after a
+                      stray drag must not open the edit dialog. The wrapper
+                      div stays plain except `relative`, which gives the
+                      per-row Handle its positioning context (RF handles are
+                      absolute; without it they all anchor to the card's
+                      vertical midpoint). */}
                   <span className="text-xs text-text-primary flex-1 truncate">
                     {summary}
                     {ciliumOnly && (
@@ -97,6 +105,7 @@ export function RuleGroupCard({
                       </span>
                     )}
                   </span>
+                  {renderRowHandle?.(rule)}
                   {portSummaryText && (
                     <span className="text-[11px] text-text-secondary shrink-0 font-mono">
                       &rarr; {portSummaryText}
@@ -108,7 +117,7 @@ export function RuleGroupCard({
                       onDelete(rule.id);
                     }}
                     aria-label={t('action-delete')}
-                    className={`${BTN_ROW_REMOVE} opacity-0 group-hover:opacity-100`}
+                    className={`${BTN_ROW_REMOVE} opacity-0 group-hover:opacity-100 nodrag nopan`}
                   >
                     <X size={12} />
                   </button>

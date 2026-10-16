@@ -39,7 +39,7 @@ export function TargetPodNode() {
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="w-8 h-8 rounded-lg border border-card-border flex items-center justify-center text-text-secondary hover:text-accent hover:border-accent/50 transition-colors shrink-0"
+            className="nodrag nopan w-8 h-8 rounded-lg border border-card-border flex items-center justify-center text-text-secondary hover:text-accent hover:border-accent/50 transition-colors shrink-0"
           >
             <Pencil size={14} />
           </button>
@@ -118,7 +118,7 @@ function DenyBadge({ dir, state, ruleCount, onToggleDeny }: DenyBadgeProps) {
           ? t(denied ? 'target-click-allow' : 'target-click-deny', { label })
           : t('target-rules-implied', { label, count: ruleCount, suffix: plural })
       }
-      className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg text-left ${
+      className={`nodrag nopan inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg text-left ${
         denied
           ? 'bg-badge-deny-bg text-arrow-deny border border-badge-deny-border'
           : state === 'allow-list'
