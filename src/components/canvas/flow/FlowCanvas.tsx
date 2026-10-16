@@ -204,6 +204,12 @@ function FlowGraph() {
         // The canvas has no user-created connections — leaving the default
         // true arms every invisible handle as a click/drag connection point.
         nodesConnectable={false}
+        // Fixed, unselectable nodes fall out of RF's pointer-events gate
+        // (isSelectable || isDraggable || node-event handlers) and get
+        // pointer-events:none on their wrapper — killing every button inside
+        // the card. The hover handler satisfies the gate so cards stay inert
+        // to drags but live to clicks.
+        onNodeMouseEnter={() => {}}
         colorMode={colorMode}
         fitView
         fitViewOptions={{ padding: 0.15 }}
