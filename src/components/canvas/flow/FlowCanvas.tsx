@@ -72,17 +72,12 @@ export function restack(nodes: Node[], ids: string[]): Node[] {
     FlowGraph re-renders on every policy edit. */
 const seedNodes = (): Node[] => {
   const offsets = layoutOffsets();
-  const base = (
-    id: string,
-    type: string,
-    draggable: boolean,
-    data: Record<string, unknown>,
-  ): Node => ({
+  const base = (id: string, type: string, data: Record<string, unknown>): Node => ({
     id,
     type,
     position: offsets.get(id) ?? { x: 0, y: 0 },
     data,
-    draggable,
+    draggable: false,
     selectable: false,
     // Declared dimensions let RF place edges before first measurement.
     // initialWidth/initialHeight (NOT width/height — those are pinned as
@@ -92,12 +87,15 @@ const seedNodes = (): Node[] => {
     initialHeight: 120,
   });
   return [
-    base(columnLabelId('ingress'), 'columnLabel', false, { direction: 'ingress' }),
-    base(columnLabelId('egress'), 'columnLabel', false, { direction: 'egress' }),
-    base(TARGET_NODE_ID, 'target', true, {}),
+    base(columnLabelId('ingress'), 'columnLabel', { direction: 'ingress' }),
+    base(columnLabelId('egress'), 'columnLabel', { direction: 'egress' }),
+    base(TARGET_NODE_ID, 'target', {}),
+    // Cards are fixed in their columns: dragging was session-only anyway,
+    // and free placement let a drag bury a card under another. The restack
+    // layout is authoritative.
     ...GROUPS.flatMap(group => [
-      base(groupNodeId('ingress', group), 'ruleGroup', true, { direction: 'ingress', group }),
-      base(groupNodeId('egress', group), 'ruleGroup', true, { direction: 'egress', group }),
+      base(groupNodeId('ingress', group), 'ruleGroup', { direction: 'ingress', group }),
+      base(groupNodeId('egress', group), 'ruleGroup', { direction: 'egress', group }),
     ]),
   ];
 };

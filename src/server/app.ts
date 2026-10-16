@@ -147,13 +147,27 @@ export function withStatic(app: Hono, distDir: string): Hono {
         '.ico': 'image/x-icon',
       };
       const ext = file.slice(file.lastIndexOf('.'));
+      // index.html must never be cached (no Cache-Control header makes
+      // browsers heuristic-cache it, serving a stale bundle after every
+      // deploy); hashed asset filenames are immutable, so they cache long.
+      const cache = ext === '.html'
+        ? 'no-cache, no-store, must-revalidate'
+        : 'public, max-age=31536000, immutable';
       return new Response(content, {
-        headers: { 'content-type': types[ext] ?? 'application/octet-stream' },
+        headers: {
+          'content-type': types[ext] ?? 'application/octet-stream',
+          'cache-control': cache,
+        },
       });
     } catch {
       // SPA fallback: unknown paths get the shell so client routing works.
       const index = await readFile(join(distDir, 'index.html'));
-      return new Response(index, { headers: { 'content-type': 'text/html' } });
+      return new Response(index, {
+        headers: {
+          'content-type': 'text/html',
+          'cache-control': 'no-cache, no-store, must-revalidate',
+        },
+      });
     }
   });
   return app;
