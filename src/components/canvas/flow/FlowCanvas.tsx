@@ -52,9 +52,11 @@ const columnIds = (direction: 'ingress' | 'egress'): string[] =>
 /**
  * Re-flow one column's rule-group nodes top-down from their measured heights.
  * Keeps the stack start and a fixed gap between cards, replacing the seed's
- * generous 90px step as soon as RF reports real card dimensions.
+ * generous 90px step as soon as RF reports real card dimensions. Exported
+ * for tests: the restack math is assertable directly, without depending on
+ * happy-dom geometry.
  */
-function restack(nodes: Node[], ids: string[]): Node[] {
+export function restack(nodes: Node[], ids: string[]): Node[] {
   let y = GROUP_Y_START;
   return nodes.map(node => {
     if (!ids.includes(node.id)) return node;
@@ -65,7 +67,9 @@ function restack(nodes: Node[], ids: string[]): Node[] {
   });
 }
 
-/** Static node seed; dragging later mutates the RF state copy by id. */
+/** Static node seed; dragging later mutates the RF state copy by id.
+    Built once at module load — useNodesState ignores re-seeding anyway, and
+    FlowGraph re-renders on every policy edit. */
 const seedNodes = (): Node[] => {
   const offsets = layoutOffsets();
   const base = (
@@ -80,10 +84,12 @@ const seedNodes = (): Node[] => {
     data,
     draggable,
     selectable: false,
-    // Declared dimensions let RF place edges before first measurement —
-    // content measures itself at runtime and corrects these.
-    width: 260,
-    height: 120,
+    // Declared dimensions let RF place edges before first measurement.
+    // initialWidth/initialHeight (NOT width/height — those are pinned as
+    // permanent inline styles) are dropped after the first real measurement,
+    // so card heights correct themselves as rules are added.
+    initialWidth: 260,
+    initialHeight: 120,
   });
   return [
     base(columnLabelId('ingress'), 'columnLabel', false, { direction: 'ingress' }),
@@ -96,18 +102,24 @@ const seedNodes = (): Node[] => {
   ];
 };
 
+const SEED_NODES = seedNodes();
+
 function FlowGraph() {
   const spec = useActiveSpec();
   const colorMode = useHtmlTheme();
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(seedNodes());
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(SEED_NODES);
 
   /**
-   * Columns whose cards the user has dragged: once a column is hand-placed,
-   * its layout belongs to the user — the auto-restack must stop reflowing it
-   * (a later height change would teleport their cards back into the stack).
+   * Columns whose cards the user has actually MOVED: once a column is
+   * hand-placed, its layout belongs to the user — the auto-restack must stop
+   * reflowing it (a later height change would teleport their cards back into
+   * the stack). Latching requires a real displacement, not just a settled
+   * drag event: d3 emits one on sub-2px mouse jitter, which would otherwise
+   * lock the column against its own consent.
    */
   const draggedColumns = useRef<Set<'ingress' | 'egress'>>(new Set());
+  const dragStartPositions = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   /**
    * Re-stack a direction's rule-group cards after their heights change (rule
@@ -119,9 +131,29 @@ function FlowGraph() {
     (changes: NodeChange<Node>[]) => {
       onNodesChange(changes);
       for (const c of changes) {
-        if (c.type === 'position' && c.dragging === false && c.id) {
-          for (const dir of ['ingress', 'egress'] as const) {
-            if (columnIds(dir).includes(c.id)) draggedColumns.current.add(dir);
+        if (c.type !== 'position' || !c.id) continue;
+        const columnId = (['ingress', 'egress'] as const).find(dir =>
+          columnIds(dir).includes(c.id),
+        );
+        if (!columnId) continue;
+        if (c.dragging) {
+          // First change of a drag is the closest reading to the grab point;
+          // later ones are already displaced.
+          if (!dragStartPositions.current.has(c.id)) {
+            dragStartPositions.current.set(c.id, {
+              x: c.position?.x ?? 0,
+              y: c.position?.y ?? 0,
+            });
+          }
+        } else {
+          // Drag settled. Latch only when the card ended somewhere meaningfully
+          // different from where this drag began it.
+          const start = dragStartPositions.current.get(c.id);
+          dragStartPositions.current.delete(c.id);
+          if (start && c.position) {
+            const dx = c.position.x - start.x;
+            const dy = c.position.y - start.y;
+            if (Math.abs(dx) > 4 || Math.abs(dy) > 4) draggedColumns.current.add(columnId);
           }
         }
       }
@@ -144,15 +176,20 @@ function FlowGraph() {
     [spec?.ingress, spec?.egress],
   );
 
-  // fitView runs once on mount; when the pane itself resizes (divider drag,
-  // window resize, cluster panel toggle) the layout would clip with no scroll
-  // fallback — refit on pane size changes instead.
+  // fitView runs once on mount. A pane resize (divider drag, window resize,
+  // cluster panel toggle) can clip the laid-out cards — the old canvas
+  // scrolled, RF doesn't — so refit, but ONLY while the user hasn't taken
+  // over the viewport: after the first zoom/pan/drag, refitting would throw
+  // away their position on every pixel of divider movement.
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { fitView } = useReactFlow();
+  const userMovedViewport = useRef(false);
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => fitView({ padding: 0.15, duration: 200 }));
+    const observer = new ResizeObserver(() => {
+      if (!userMovedViewport.current) fitView({ padding: 0.15 });
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, [fitView]);
@@ -166,13 +203,19 @@ function FlowGraph() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         elementsSelectable={false}
+        // The canvas has no user-created connections — leaving the default
+        // true arms every invisible handle as a click/drag connection point.
+        nodesConnectable={false}
         colorMode={colorMode}
         fitView
         fitViewOptions={{ padding: 0.15 }}
         proOptions={{ hideAttribution: true }}
         minZoom={0.3}
         maxZoom={1.5}
-      >
+      onMoveStart={() => {
+        userMovedViewport.current = true;
+      }}
+    >
         {/* The Background paints --xy-background-color as a solid fill (RF's
             dark default #141414) — transparent keeps the app's bg-canvas
             gradient visible under the dots. */}

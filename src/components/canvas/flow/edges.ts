@@ -1,6 +1,5 @@
 import type { Direction, Endpoint } from '@/types/policy';
 import type { Edge } from '@xyflow/react';
-import { MarkerType } from '@xyflow/react';
 import { edgeId, groupNodeId, TARGET_NODE_ID } from './layout';
 import { ARROW_MARKER } from './AllowEdge';
 
@@ -28,7 +27,7 @@ export function buildFlowEdges(
           target: groupNodeId(direction, rule.group),
           targetHandle: rule.id,
         }),
-    markerEnd: { ...ARROW_MARKER, type: MarkerType.ArrowClosed },
+    markerEnd: { ...ARROW_MARKER },
   });
   return [...ingress.map(r => mk('ingress', r)), ...egress.map(r => mk('egress', r))];
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { Direction, Endpoint } from '@/types/policy';
 import { mergeEndpoint } from '@/types/policy';
@@ -83,11 +84,14 @@ export function RuleDialog({
     ? t('dialog-edit-rule', { direction: dirLabel, group: groupLabel })
     : t('dialog-new-rule', { direction: dirLabel, group: groupLabel });
 
-  return (
+  // Portal to <body>: the dialog renders inside a React Flow node whose
+  // wrapper carries a transform, which would otherwise become the containing
+  // block for `fixed` — dimming only the card instead of the viewport.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={onClose}
-    >
+    >,
       <div
         role="dialog"
         aria-modal="true"
@@ -186,7 +190,8 @@ export function RuleDialog({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

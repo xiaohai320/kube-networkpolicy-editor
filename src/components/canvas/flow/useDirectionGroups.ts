@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import type { Direction, Endpoint } from '@/types/policy';
 import { cloneEndpoint } from '@/types/policy';
-import { usePolicyContext, useActiveSpec } from '@/state/context';
+import { usePolicyContext } from '@/state/context';
 import { addEndpoint, removeEndpoint, updateEndpoint } from '@/state/actions';
 import { useDirectionData } from './direction-data';
 
@@ -12,11 +12,10 @@ import { useDirectionData } from './direction-data';
  */
 export function useDirectionGroups(direction: Direction) {
   const { state, dispatch } = usePolicyContext();
-  const spec = useActiveSpec();
-  const { byGroup, duplicateIds } = useDirectionData(direction);
+  const { rules, byGroup, duplicateIds } = useDirectionData(direction);
 
   // The kube-dns shortcut is a one-shot affordance, so it hides itself once used.
-  const hasKubeDns = direction === 'egress' && spec?.egress.some(r => r.kind === 'kube-dns');
+  const hasKubeDns = direction === 'egress' && rules.some(r => r.kind === 'kube-dns');
 
   const handleAdd = useCallback(
     (endpoint: Endpoint) => {

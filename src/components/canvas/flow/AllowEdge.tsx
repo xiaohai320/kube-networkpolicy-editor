@@ -44,4 +44,7 @@ export const ARROW_MARKER = {
   color: 'var(--color-arrow-allow)',
   width: 13,
   height: 10,
+  // SVG markers scale with stroke width by default; the old ArrowLayer drew
+  // the arrow at literal size (userSpaceOnUse), so keep that behaviour.
+  markerUnits: 'userSpaceOnUse' as const,
 };

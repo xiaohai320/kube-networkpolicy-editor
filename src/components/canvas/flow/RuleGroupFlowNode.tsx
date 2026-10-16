@@ -30,35 +30,29 @@ export function RuleGroupFlowNode({ data }: NodeProps<Node<RuleGroupData>>) {
   const isIngress = direction === 'ingress';
 
   return (
-    <>
-      {/* Ingress edges flow FROM the rules TO the target: rules are sources.
-          Egress edges arrive FROM the target: rules are targets. */}
-      <Handle
-        type={isIngress ? 'target' : 'source'}
-        position={Position.Left}
-        className="!bg-transparent !border-0 !w-2 !h-2"
-      />
-      <RuleGroupCard
-        icon={<Icon size={16} />}
-        title={t(titleKey)}
-        subtitle={t(GROUP_SUBTITLES[group])}
-        subTypes={pickersFor(t, direction, group, hasKubeDns)}
-        rules={byGroup[group]}
-        direction={direction}
-        format={format}
-        onAdd={onAdd}
-        onUpdate={onUpdate}
-        onDelete={onDelete}
-        duplicateIds={duplicateIds}
-        renderRowHandle={(rule: Endpoint) => (
-          <Handle
-            type={isIngress ? 'source' : 'target'}
-            position={isIngress ? Position.Right : Position.Left}
-            id={rule.id}
-            className="!bg-transparent !border-0 !w-2 !h-2"
-          />
-        )}
-      />
-    </>
+    <RuleGroupCard
+      icon={<Icon size={16} />}
+      title={t(titleKey)}
+      subtitle={t(GROUP_SUBTITLES[group])}
+      subTypes={pickersFor(t, direction, group, hasKubeDns)}
+      rules={byGroup[group]}
+      direction={direction}
+      format={format}
+      onAdd={onAdd}
+      onUpdate={onUpdate}
+      onDelete={onDelete}
+      duplicateIds={duplicateIds}
+      renderRowHandle={(rule: Endpoint) => (
+        // The only handles on the card: one per rule row. Edges never
+        // reference a card-level handle, and a card-level one would sit at
+        // the card's midpoint edge grabbing pointer events.
+        <Handle
+          type={isIngress ? 'source' : 'target'}
+          position={isIngress ? Position.Right : Position.Left}
+          id={rule.id}
+          className="!bg-transparent !border-0 !w-2 !h-2"
+        />
+      )}
+    />
   );
 }

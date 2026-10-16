@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { MatchExpression } from '@/types/policy';
 import { LabelEditor } from './LabelEditor';
@@ -61,7 +62,10 @@ export function PodSelectorModal({
     onClose();
   };
 
-  return (
+  // Portal to <body>: this modal renders inside a React Flow node whose
+  // wrapper carries a transform, which would otherwise become the containing
+  // block for `fixed` — dimming only the card instead of the viewport.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={onClose}
@@ -163,6 +167,7 @@ export function PodSelectorModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

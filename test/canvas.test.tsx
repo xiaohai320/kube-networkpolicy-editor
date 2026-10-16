@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import './rf-polyfill';
+import type { Node } from '@xyflow/react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import i18next from 'i18next';
@@ -10,6 +11,8 @@ import { PolicyProvider } from '@/state/context';
 import { initI18n } from '@/i18n';
 import { VisualCanvas } from '@/components/canvas/VisualCanvas';
 import { buildFlowEdges } from '@/components/canvas/flow/edges';
+import { restack } from '@/components/canvas/flow/FlowCanvas';
+import { GROUP_Y_START, GROUP_GAP } from '@/components/canvas/flow/layout';
 import { ep, policy } from './helpers';
 
 beforeAll(() => {
@@ -61,9 +64,10 @@ describe('flow canvas render', () => {
     // Target pod: one target handle (left) + one source handle (right).
     const targetNode = document.querySelector('[data-id="target"]')!;
     expect(targetNode.querySelectorAll('.react-flow__handle')).toHaveLength(2);
-    // Rule-group node with one rule: row handle + mirrored column handle.
+    // Rule-group node with one rule: exactly its per-row handle — card-level
+    // phantom handles would grab pointer events at the card's midpoint edge.
     const clusterNode = document.querySelector('[data-id="ingress-cluster"]')!;
-    expect(clusterNode.querySelectorAll('.react-flow__handle')).toHaveLength(2);
+    expect(clusterNode.querySelectorAll('.react-flow__handle')).toHaveLength(1);
   });
 
   it('gives each rule row a positioning context for its handle', () => {
@@ -123,6 +127,43 @@ describe('edge construction', () => {
 
   it('produces no edges when the policy has no rules', () => {
     expect(buildFlowEdges([], [])).toEqual([]);
+  });
+});
+
+describe('column restack', () => {
+  /**
+   * The polyfill reports a constant 260x120 for every element — it cannot
+   * see real card heights — so the restack arithmetic is asserted directly
+   * with heterogeneous heights, which is what the overlap bug would need.
+   */
+  it('stacks column cards top-down from their real measured heights', () => {
+    const mk = (id: string, height: number): Node =>
+      ({
+        id,
+        position: { x: 0, y: 0 },
+        data: {},
+        measured: { width: 260, height },
+      }) as Node;
+    const ingressIds = ['ingress-outside', 'ingress-namespace', 'ingress-cluster'];
+    const nodes = ingressIds.map((id, i) => mk(id, 120 + i * 80)); // 120, 200, 280
+
+    const stacked = restack(nodes, ingressIds);
+    expect(stacked[0]!.position.y).toBe(GROUP_Y_START);
+    expect(stacked[1]!.position.y).toBe(GROUP_Y_START + 120 + GROUP_GAP);
+    expect(stacked[2]!.position.y).toBe(GROUP_Y_START + 120 + GROUP_GAP + 200 + GROUP_GAP);
+    // Cards outside the column are untouched.
+    expect(stacked.map(n => n.id)).toEqual(ingressIds);
+  });
+
+  it('leaves other columns untouched', () => {
+    const node = {
+      id: 'egress-outside',
+      position: { x: 840, y: 500 },
+      data: {},
+      measured: { width: 260, height: 200 },
+    } as Node;
+    const stacked = restack([node], ['ingress-outside', 'ingress-namespace']);
+    expect(stacked[0]!.position.y).toBe(500);
   });
 });
 
