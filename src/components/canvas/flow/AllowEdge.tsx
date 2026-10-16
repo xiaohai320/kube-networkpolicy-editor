@@ -42,8 +42,8 @@ export function AllowEdge({
 export const ARROW_MARKER = {
   type: 'arrowclosed' as const,
   color: 'var(--color-arrow-allow)',
-  width: 20,
-  height: 15,
+  width: 28,
+  height: 21,
   // SVG markers scale with stroke width by default; the old ArrowLayer drew
   // the arrow at literal size (userSpaceOnUse), so keep that behaviour.
   markerUnits: 'userSpaceOnUse' as const,
