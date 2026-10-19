@@ -277,14 +277,48 @@ describe('adaptPolicy — raw apiserver spellings', () => {
     expect(p!.specs[0]!.endpointSelector).toEqual({ matchLabels: { app: 'web' } });
   });
 
-  it('Cilium ingress: [{}] deny marker yields enforcement with no allows', () => {
+  it('Cilium ingress: [{}] is an allowAll wildcard, not a deny marker', () => {
     const p = adaptPolicy({
-      metadata: { name: 'deny', namespace: 'app' },
+      metadata: { name: 'allow-all', namespace: 'app' },
       spec: { endpointSelector: { matchLabels: { 'k8s:app': 'db' } }, ingress: [{}] },
     }, 'CiliumNetworkPolicy', 'app')!;
     const s = p.specs[0]!;
     expect(s.enforcedIngress).toBe(true);
+    // The wildcard allows from anywhere: world + host + kube-apiserver + all
+    // local workloads (no podSelector = selects everything in the ns).
+    expect(s.ingress.map(e => e.target.kind).sort()).toEqual(
+      ['host', 'kube-apiserver', 'workload', 'world'],
+    );
+    const workloadEp = s.ingress.find(e => e.target.kind === 'workload')!;
+    expect(workloadEp.podSelector).toBeUndefined();
+  });
+
+  it('Cilium bare selector (no rule keys) enforces both directions', () => {
+    const p = adaptPolicy({
+      metadata: { name: 'deny', namespace: 'app' },
+      spec: { endpointSelector: { matchLabels: { 'k8s:app': 'db' } } },
+    }, 'CiliumNetworkPolicy', 'app')!;
+    const s = p.specs[0]!;
+    expect(s.enforcedIngress).toBe(true);
+    expect(s.enforcedEgress).toBe(true);
     expect(s.ingress).toEqual([]);
+    expect(s.egress).toEqual([]);
+  });
+
+  it('Cilium ingressDeny: [{}] yields enforcement with no allows', () => {
+    const p = adaptPolicy({
+      metadata: { name: 'deny', namespace: 'app' },
+      spec: {
+        endpointSelector: { matchLabels: { 'k8s:app': 'db' } },
+        ingressDeny: [{}],
+        egress: [{ toEndpoints: [{ matchLabels: { 'k8s:app': 'web' } }] }],
+      },
+    }, 'CiliumNetworkPolicy', 'app')!;
+    const s = p.specs[0]!;
+    expect(s.enforcedIngress).toBe(true);
+    expect(s.ingress).toEqual([]);
+    expect(s.enforcedEgress).toBe(true);
+    expect(s.egress).toHaveLength(1);
   });
 });
 

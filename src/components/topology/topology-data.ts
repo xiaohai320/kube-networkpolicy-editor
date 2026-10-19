@@ -23,6 +23,7 @@ import {
 interface RawPod {
   metadata?: { name?: string; labels?: Record<string, string> };
   status?: {
+    phase?: string;
     conditions?: Array<{ type?: string; status?: string }>;
   };
 }
@@ -34,11 +35,17 @@ function podReady(pod: RawPod): boolean {
   );
 }
 
-/** One namespace's pods, narrowed to the engine's PodInfo. */
+/** One namespace's pods, narrowed to the engine's PodInfo. Finished pods
+    (Job debug shells, completed init containers' hosts) are skipped: they
+    hold no traffic, so a topology board only shows Running and Pending. */
 export async function listPods(namespace: string): Promise<PodInfo[]> {
   const res = await request(`api/v1/namespaces/${namespace}/pods`);
   const items = ((await res.json()) as { items?: RawPod[] }).items ?? [];
-  return items.map(pod => ({
+  const live = items.filter(pod => {
+    const phase = pod.status?.phase ?? '';
+    return phase === 'Running' || phase === 'Pending' || phase === '';
+  });
+  return live.map(pod => ({
     name: pod.metadata?.name ?? '',
     labels: pod.metadata?.labels ?? {},
     ready: podReady(pod),
@@ -122,6 +129,8 @@ interface RawCiliumSpec {
   endpointSelector?: Record<string, unknown>;
   ingress?: RawCiliumRule[];
   egress?: RawCiliumRule[];
+  ingressDeny?: RawCiliumRule[];
+  egressDeny?: RawCiliumRule[];
 }
 
 interface RawCiliumRule {
@@ -372,15 +381,37 @@ export function adaptPolicy(
 
     // Cilium spec group.
     const spec = raw as RawCiliumSpec;
-    // Cilium enforcement: a direction key present at all (even `[]` or the
-    // `[{}]` deny marker) means the policy enforces that direction for the
-    // selected endpoints; an absent key leaves it open.
-    const hasIngressKey = spec.ingress !== undefined;
-    const hasEgressKey = spec.egress !== undefined;
+    // Cilium enforcement (real semantics): a direction is enforced for the
+    // selected endpoints when the spec DEFINES it — rules in the direction
+    // (allow or deny) — or when the spec has no rules at all (a bare
+    // endpointSelector enables enforcement for BOTH directions). An absent
+    // key with other rules present leaves that direction open. Note an empty
+    // allow rule object (`ingress: [{}]`) is an allowAll wildcard — an ALLOW,
+    // not a deny marker.
+    const ingressRules = spec.ingress ?? [];
+    const egressRules = spec.egress ?? [];
+    const hasIngressDeny = (spec.ingressDeny?.length ?? 0) > 0;
+    const hasEgressDeny = (spec.egressDeny?.length ?? 0) > 0;
+    const bareSelectorEnforcesBoth = ingressRules.length === 0 && egressRules.length === 0;
+    const enforcedIngress = ingressRules.length > 0 || hasIngressDeny || bareSelectorEnforcesBoth;
+    const enforcedEgress = egressRules.length > 0 || hasEgressDeny || bareSelectorEnforcesBoth;
 
     const ingress: EngineEndpoint[] = [];
-    for (const rule of spec.ingress ?? []) {
+    for (const rule of ingressRules) {
       const ports = portsSummary(rule.toPorts);
+      if (Object.keys(rule).length === 0) {
+        // allowAll wildcard: traffic from anywhere — the board draws world,
+        // host, kube-apiserver, and every local workload (no selector).
+        for (const target of [
+          { kind: 'world' } as const,
+          { kind: 'host' } as const,
+          { kind: 'kube-apiserver' } as const,
+        ]) {
+          ingress.push({ target, ports });
+        }
+        ingress.push({ target: { kind: 'workload' }, ports });
+        continue;
+      }
       for (const sel of rule.fromEndpoints ?? []) {
         const ep = ciliumEndpointToEndpoint(sel, boardNamespace);
         if (ep) ingress.push({ ...ep, ports });
@@ -397,8 +428,19 @@ export function adaptPolicy(
       }
     }
     const egress: EngineEndpoint[] = [];
-    for (const rule of spec.egress ?? []) {
+    for (const rule of egressRules) {
       const ports = portsSummary(rule.toPorts);
+      if (Object.keys(rule).length === 0) {
+        for (const target of [
+          { kind: 'world' } as const,
+          { kind: 'host' } as const,
+          { kind: 'kube-apiserver' } as const,
+        ]) {
+          egress.push({ target, ports });
+        }
+        egress.push({ target: { kind: 'workload' }, ports });
+        continue;
+      }
       for (const sel of rule.toEndpoints ?? []) {
         const ep = ciliumEndpointToEndpoint(sel, boardNamespace);
         if (ep) egress.push({ ...ep, ports });
@@ -432,8 +474,8 @@ export function adaptPolicy(
       namespaceSelector: hasCcnpNsScope ? ccnpNsSel : undefined,
       ingress,
       egress,
-      enforcedIngress: hasIngressKey,
-      enforcedEgress: hasEgressKey,
+      enforcedIngress,
+      enforcedEgress,
     };
   });
 

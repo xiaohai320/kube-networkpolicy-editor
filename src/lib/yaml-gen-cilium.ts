@@ -192,8 +192,15 @@ function buildRule(
 
 /**
  * Rules for one direction, or `null` when the field should be omitted.
- * Omitting `ingress`/`egress` means allow-all, so this only returns `null`
- * when there are no rules AND default-deny is off.
+ *
+ * Real Cilium semantics, as of this generator: a direction key ABSENT (or an
+ * empty list, which is indistinguishable after JSON unmarshal) means the spec
+ * does not define that direction — selected endpoints are NOT restricted by
+ * it. A rule object with no fields (`ingress: [{}]`) is the allowAll wildcard
+ * — it explicitly allows everything. Default-deny therefore must NOT be
+ * spelled `[{}]` (that allows!); it is spelled as a rule in `ingressDeny` /
+ * `egressDeny` — an empty deny rule denies everything, and deny rules also
+ * enable enforcement for the direction.
  */
 function rulesFor(
   spec: PolicySpec,
@@ -202,17 +209,28 @@ function rulesFor(
 ): Array<{ rule: CiliumRule; id: string | null }> | null {
   const prefix = direction === 'ingress' ? 'from' : 'to';
   const endpoints = direction === 'ingress' ? spec.ingress : spec.egress;
-  const denied = direction === 'ingress' ? spec.defaultDenyIngress : spec.defaultDenyEgress;
 
-  // An empty rule object is dropped, not emitted: in Cilium `ingress: [{}]` is
-  // the deny-all marker, so a stub for an unrepresentable rule would silently
-  // cancel every rule in the same list.
+  // A rule stub that serializes to nothing (an unrepresentable peer) is
+  // dropped: emitting an empty object would be an allowAll wildcard — the
+  // exact opposite of the deny marker it used to be read as.
   const rules = endpoints
     .map(e => ({ rule: buildRule(e, prefix, policyNamespace), id: e.id }))
     .filter(r => Object.keys(r.rule).length > 0);
-  if (rules.length > 0) return rules;
-  // The deny-all marker object has no canvas rule behind it — no sentinel.
-  return denied ? [{ rule: {}, id: null }] : null;
+  return rules.length > 0 ? rules : null;
+}
+
+/**
+ * The deny section for one direction, or `null` when it should be omitted.
+ * The editor's default-deny badge emits an empty deny rule — Cilium's
+ * "deny everything" spelling, which also turns enforcement on for the
+ * direction. Note this deny is absolute: unlike a bare selected endpoint
+ * (denied only until another policy allows something), ingressDeny denies
+ * regardless of any allow rule anywhere. The badge's semantics say
+ * "deny everything", so the stronger spelling matches intent.
+ */
+function denyRulesFor(spec: PolicySpec, direction: Direction): Array<CiliumRule> | null {
+  const denied = direction === 'ingress' ? spec.defaultDenyIngress : spec.defaultDenyEgress;
+  return denied ? [{}] : null;
 }
 
 interface SpecCilium {
@@ -231,6 +249,7 @@ function specToCilium(spec: PolicySpec, policy: Policy): SpecCilium {
 
   const unsupported: Direction[] = [];
   const ruleIds: SpecCilium['ruleIds'] = { ingress: [], egress: [] };
+
   for (const direction of ['ingress', 'egress'] as Direction[]) {
     const rules = rulesFor(spec, direction, policy.namespace);
     // Rules imported from YAML that the model cannot represent are appended
@@ -246,6 +265,31 @@ function specToCilium(spec: PolicySpec, policy: Policy): SpecCilium {
     out[direction] = rulesOut;
     if (rules !== null) ruleIds[direction] = rules.map(r => r.id).filter((id): id is string => id !== null);
     if (extra.length > 0) unsupported.push(direction);
+  }
+
+  // Deny sections: the badge's deny-all marker, plus deny rules the model
+  // cannot represent, preserved verbatim in their own bucket (re-emitting
+  // them into the allow lists would invert their meaning).
+  for (const direction of ['ingress', 'egress'] as Direction[]) {
+    const denyKey = direction === 'ingress' ? 'ingressDeny' : 'egressDeny';
+    const denied = denyRulesFor(spec, direction);
+    const denyExtra = policy.unsupported?.[denyKey] ?? [];
+    if (denied === null && denyExtra.length === 0) continue;
+    const denyOut = [...(denied ?? []), ...denyExtra];
+    if (denyOut.length === 0) continue;
+    out[denyKey] = denyOut;
+    if (denyExtra.length > 0) unsupported.push(direction);
+  }
+
+  // The CRD's anyOf requires at least one of ingress/egress/ingressDeny/
+  // egressDeny on the spec. Two cases still produce none:
+  //   - both directions allow-all (nothing to write): the empty rule objects
+  //     below are allowAll wildcards — they pass anyOf AND genuinely allow
+  //     everything, even when another policy turns enforcement on.
+  //   - (deny-all both is handled above: both deny keys are emitted.)
+  if (!('ingress' in out) && !('egress' in out) && !('ingressDeny' in out) && !('egressDeny' in out)) {
+    out.ingress = [{}];
+    out.egress = [{}];
   }
 
   return { spec: out, unsupported, ruleIds };

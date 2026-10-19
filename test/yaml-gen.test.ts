@@ -121,9 +121,11 @@ describe('generateCiliumYaml', () => {
   it('omits an ingress side holding only FQDNs', () => {
     const p = policy({}, { ingress: [ep('fqdn', 'outside', { matchPattern: '*.example.com' })] });
     const spec = specsOf(doc(generateCiliumYaml(p)))[0]!;
-    // Emitting `ingress: [{}]` for the unrepresentable rule would be read back
-    // as deny-all ingress, so the direction is omitted instead.
-    expect(spec.ingress).toBeUndefined();
+    // The unrepresentable direction is omitted. The CRD's anyOf then requires
+    // SOMETHING on the spec — the fallback emits allowAll wildcards, which
+    // honestly allow all (the FQDN rule never existed in the direction anyway).
+    expect(spec.ingress).toEqual([{}]);
+    expect(spec.egress).toEqual([{}]);
   });
 
   it('does not let an unrepresentable rule deny the rest of the direction', () => {
@@ -217,10 +219,13 @@ describe('generateCiliumYaml', () => {
     ]);
   });
 
-  it('emits default-deny ingress as an empty rule object', () => {
+  it('emits default-deny ingress via ingressDeny, not an allow wildcard', () => {
     const p = policy({}, { defaultDenyIngress: true });
     const spec = specsOf(doc(generateCiliumYaml(p)))[0]!;
-    expect(spec.ingress).toEqual([{}]);
+    // `ingress: [{}]` is an allowAll rule in Cilium — the deny-all spelling
+    // is an empty rule in ingressDeny, which also turns enforcement on.
+    expect(spec.ingress).toBeUndefined();
+    expect(spec.ingressDeny).toEqual([{}]);
     expect(spec.egress).toBeUndefined();
   });
 

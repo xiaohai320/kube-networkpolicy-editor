@@ -137,10 +137,14 @@ export interface PolicySpec {
 
 export type PolicyFormat = 'k8s' | 'cilium';
 
-/** Rules the editor cannot represent, kept so an import is not lossy. */
+/** Rules the editor cannot represent, kept so an import is not lossy.
+    Deny-section rules ride in their own buckets: re-emitting them into the
+    allow lists would turn "deny this CIDR" into "allow this CIDR". */
 export interface UnsupportedRules {
   ingress: unknown[];
   egress: unknown[];
+  ingressDeny?: unknown[];
+  egressDeny?: unknown[];
 }
 
 export interface Policy {

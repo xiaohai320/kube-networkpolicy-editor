@@ -542,7 +542,7 @@ type ParsedSpec = PolicySpec & { unsupported?: UnsupportedRules };
  * namespace out explicitly.
  */
 function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string): ParsedSpec {
-  const unsupported: { ingress: unknown[]; egress: unknown[] } = { ingress: [], egress: [] };
+  const unsupported: UnsupportedRules = { ingress: [], egress: [] };
 
   const parseRules = (
     direction: Direction,
@@ -555,7 +555,14 @@ function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string)
 
     for (const rule of raw) {
       const ownKeys = Object.keys(rule);
-      if (ownKeys.length === 0) continue; // `ingress: [{}]` is the default-deny marker
+      if (ownKeys.length === 0) {
+        // An empty rule object is Cilium's allowAll wildcard: it matches every
+        // source/destination, so it imports as an explicit "all" peer. (The
+        // deny-all direction is the KEY being absent — enforcement without
+        // rules — or an empty object in the ingressDeny list, not this.)
+        out.push(makeEndpoint('all', 'cluster', {}));
+        continue;
+      }
       if (!ownKeys.every(k => validKeys.has(k))) {
         bucket.push(rule);
         continue;
@@ -605,24 +612,50 @@ function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string)
   const ingress = parseRules('ingress', INGRESS_KEYS, unsupported.ingress);
   const egress = parseRules('egress', EGRESS_KEYS, unsupported.egress);
 
-  // Cilium's deny-all marker is a list containing an empty rule object. A list
-  // of ordinary rules is a restriction, not a default-deny.
-  const denied = (key: 'ingress' | 'egress') =>
-    Array.isArray(spec[key]) &&
-    (spec[key] as unknown[]).some(
-      e => e === null || (typeof e === 'object' && Object.keys(e as Record<string, unknown>).length === 0),
-    );
+  // Deny sections: an empty deny rule object denies EVERYTHING in the
+  // direction (the modelable "deny all"); anything else there is a selective
+  // deny rule the canvas has no shape for — preserved verbatim instead.
+  const parseDenyRules = (key: 'ingressDeny' | 'egressDeny', bucket: unknown[]): boolean => {
+    const raw = asRecordArray(spec[key]);
+    if (!raw) return false;
+    let denyAll = false;
+    for (const rule of raw) {
+      if (Object.keys(rule).length === 0) denyAll = true;
+      else bucket.push(rule);
+    }
+    return denyAll;
+  };
+  const denyAllIngress = parseDenyRules('ingressDeny', unsupported.ingressDeny ??= []);
+  const denyAllEgress = parseDenyRules('egressDeny', unsupported.egressDeny ??= []);
+
+  // Enforcement (real Cilium semantics): selecting endpoints puts them under
+  // policy for the directions the spec DEFINES. A direction is defined when it
+  // has rules (allow or deny); a spec with NO rules at all — a bare
+  // endpointSelector — enables enforcement for BOTH directions. A defined
+  // direction with no allow rules is default-deny; a direction the spec does
+  // not define stays open (allow-all) unless another policy enforces it.
+  // (An empty allow list is indistinguishable from an absent key: nil ==
+  // [] after JSON unmarshal.)
+  const bareSelectorEnforcesBoth = ingress.length === 0 && egress.length === 0 &&
+    unsupported.ingress.length === 0 && unsupported.egress.length === 0 &&
+    (unsupported.ingressDeny?.length ?? 0) === 0 && (unsupported.egressDeny?.length ?? 0) === 0 &&
+    !denyAllIngress && !denyAllEgress; // an explicit deny rule defines that direction
+  const defaultDenyIngress = (ingress.length === 0 && unsupported.ingress.length === 0) &&
+    (bareSelectorEnforcesBoth || denyAllIngress || (unsupported.ingressDeny?.length ?? 0) > 0);
+  const defaultDenyEgress = (egress.length === 0 && unsupported.egress.length === 0) &&
+    (bareSelectorEnforcesBoth || denyAllEgress || (unsupported.egressDeny?.length ?? 0) > 0);
 
   const parsed: ParsedSpec = {
     id: generateId(),
     endpointSelector: parseCiliumEndpointSelector(asObject(spec.endpointSelector)),
     ingress,
     egress,
-    defaultDenyIngress: denied('ingress'),
-    defaultDenyEgress: denied('egress'),
+    defaultDenyIngress,
+    defaultDenyEgress,
   };
 
-  if (unsupported.ingress.length + unsupported.egress.length > 0) {
+  if (unsupported.ingress.length + unsupported.egress.length +
+      (unsupported.ingressDeny?.length ?? 0) + (unsupported.egressDeny?.length ?? 0) > 0) {
     parsed.unsupported = unsupported;
   }
   return parsed;
@@ -661,6 +694,8 @@ export function parseCiliumYaml(yamlString: string): Policy {
     if (!u) continue;
     unsupported.ingress.push(...u.ingress);
     unsupported.egress.push(...u.egress);
+    unsupported.ingressDeny = [...(unsupported.ingressDeny ?? []), ...(u.ingressDeny ?? [])];
+    unsupported.egressDeny = [...(unsupported.egressDeny ?? []), ...(u.egressDeny ?? [])];
     delete p.unsupported;
   }
 
@@ -671,7 +706,8 @@ export function parseCiliumYaml(yamlString: string): Policy {
     format: 'cilium',
     specs: parsed,
   };
-  if (unsupported.ingress.length + unsupported.egress.length > 0) {
+  if (unsupported.ingress.length + unsupported.egress.length +
+      (unsupported.ingressDeny?.length ?? 0) + (unsupported.egressDeny?.length ?? 0) > 0) {
     policy.unsupported = unsupported;
   }
   return policy;
