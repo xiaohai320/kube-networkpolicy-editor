@@ -60,7 +60,7 @@ export const zh = {
   'count-warnings': '{{count}} 个警告',
   'count-infos': '{{count}} 条提示',
 
-  'summary-empty-policy': '未定义任何规则 —— 此策略不会生效',
+  'summary-empty-policy': '未定义任何规则 —— 此策略对入站和出站均不限制',
   'summary-duplicate-ingress': '{{count}} 条重复的入站规则',
   'summary-duplicate-egress': '{{count}} 条重复的出站规则',
   'summary-k8s-unrepresentable': '{{endpoint}} 无法用 Kubernetes NetworkPolicy 表达',

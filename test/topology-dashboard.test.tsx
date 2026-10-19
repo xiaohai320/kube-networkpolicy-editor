@@ -110,11 +110,12 @@ describe('TopologyDashboard', () => {
     expect(screen.getByText(/web-to-db/)).toBeInTheDocument();
   });
 
-  it('drawer load action calls onLoadPolicy with fetched YAML', async () => {
+  it('drawer load action calls onLoadPolicy with fetched YAML and closes the board', async () => {
     const onLoadPolicy = vi.fn();
+    const onClose = vi.fn();
     render(
       <TopologyDashboard
-        onClose={() => {}}
+        onClose={onClose}
         onLoadPolicy={onLoadPolicy}
         onStartAuthoring={() => {}}
       />,
@@ -124,6 +125,9 @@ describe('TopologyDashboard', () => {
     await waitFor(() => expect(screen.getByText('Load into editor')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Load into editor'));
     await waitFor(() => expect(onLoadPolicy).toHaveBeenCalledWith('kind: NetworkPolicy\n', 'app/web-to-db'));
+    // The new editor tab sits behind this fullscreen overlay — closing makes
+    // the jump visible instead of happening silently.
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('empty-state CTA calls onStartAuthoring', async () => {

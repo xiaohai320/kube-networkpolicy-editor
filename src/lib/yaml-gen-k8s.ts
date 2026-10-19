@@ -31,6 +31,14 @@ interface K8sRule {
 }
 
 const ZERO_CIDR = '0.0.0.0/0';
+/**
+ * Id of the synthesized allow-all rule that pins ingress open when both
+ * directions are allow-all (see pinnedAllowAllIngress). It has no canvas
+ * endpoint behind it, so hover mapping must never emit it — the ruleMap is
+ * built from sentinels, though, and this id WILL land in ruleIds; callers
+ * only look up ids the canvas knows, so an unknown id is inert.
+ */
+const ALLOW_ALL_PIN_ID = 'allow-all-pin';
 
 function k8sSelector(labels?: Record<string, string>, expressions?: MatchExpression[]): Record<string, unknown> {
   if (!labels && !expressions) return {};
@@ -146,6 +154,21 @@ function policyTypesFor(spec: PolicySpec): string[] {
 }
 
 /**
+ * The apiserver defaults an omitted (or empty) `policyTypes` to `[Ingress]` —
+ * so a policy where BOTH directions are allow-all cannot be written by leaving
+ * everything out: the defaulting silently turns "allow everything" into
+ * "deny all ingress" on apply. There is no YAML for "this NetworkPolicy
+ * selects pods and restricts nothing", so the generator instead pins ingress
+ * open explicitly: an `ipBlock: 0.0.0.0/0` allow rule plus `policyTypes:
+ * [Ingress]` (egress stays out of policyTypes, hence unrestricted). Round
+ * trip the rule shows as an explicit allow rule — which is exactly what the
+ * cluster now enforces.
+ */
+function pinnedAllowAllIngress(): { rule: K8sRule; id: string } {
+  return { rule: { from: [{ ipBlock: { cidr: ZERO_CIDR } }] }, id: ALLOW_ALL_PIN_ID };
+}
+
+/**
  * `forceQuotes` matters here: js-yaml's default schema is YAML 1.1, so without
  * it a label value of `yes` would be written as a bare scalar and read back as
  * a boolean on import. Quoting every value closes that whole class of
@@ -191,10 +214,20 @@ function specToDocument(policy: Policy, spec: PolicySpec, name?: string): SpecDo
   const specObj = out.spec as Record<string, unknown>;
 
   const policyTypes = policyTypesFor(spec);
-  if (policyTypes.length > 0) specObj.policyTypes = policyTypes;
-
   const omitted: Direction[] = [];
   const ruleIds: SpecDocument['ruleIds'] = { ingress: [], egress: [] };
+
+  if (policyTypes.length === 0) {
+    // Both directions allow-all: writing nothing lets the apiserver's
+    // policyTypes defaulting deny all ingress. Pin ingress open instead.
+    specObj.policyTypes = ['Ingress'];
+    specObj.ingress = [withRuleSentinel(pinnedAllowAllIngress().rule, ALLOW_ALL_PIN_ID)];
+    ruleIds.ingress = [ALLOW_ALL_PIN_ID];
+    return { doc: out, omitted, ruleIds };
+  }
+
+  specObj.policyTypes = policyTypes;
+
   for (const direction of ['ingress', 'egress'] as Direction[]) {
     const endpoints = direction === 'ingress' ? spec.ingress : spec.egress;
     const dropped = endpoints.filter(e => isK8sUnrepresentable(e));

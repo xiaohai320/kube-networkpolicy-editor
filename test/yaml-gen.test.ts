@@ -438,9 +438,13 @@ describe('generateK8sYaml', () => {
     expect(spec.egress).toBeUndefined();
   });
 
-  it('omits policyTypes when nothing is restricted', () => {
+  it('pins ingress open when nothing is restricted (policyTypes defaulting guard)', () => {
     const spec = doc(generateK8sYaml(policy())).spec as Record<string, unknown>;
-    expect(spec.policyTypes).toBeUndefined();
+    // An omitted policyTypes is defaulted to [Ingress] by the apiserver,
+    // which would deny all ingress. The generator pins an explicit allow-all
+    // ingress rule instead.
+    expect(spec.policyTypes).toEqual(['Ingress']);
+    expect(JSON.stringify(spec.ingress)).toContain('0.0.0.0/0');
   });
 
   it('exports several specs as a multi-document stream', () => {

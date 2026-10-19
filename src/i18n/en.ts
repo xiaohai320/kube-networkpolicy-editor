@@ -61,7 +61,7 @@ export const en = {
   'count-warnings': '{{count}} warning{{suffix}}',
   'count-infos': '{{count}} info',
 
-  'summary-empty-policy': 'No rules defined — this policy has no effect',
+  'summary-empty-policy': 'No rules defined — this policy allows all traffic in both directions',
   'summary-duplicate-ingress': '{{count}} duplicate ingress rule{{suffix}}',
   'summary-duplicate-egress': '{{count}} duplicate egress rule{{suffix}}',
   'summary-k8s-unrepresentable': '{{endpoint}} cannot be expressed in a Kubernetes NetworkPolicy',

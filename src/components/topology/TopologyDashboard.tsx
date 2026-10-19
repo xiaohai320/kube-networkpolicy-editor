@@ -173,14 +173,21 @@ export function TopologyDashboard({ onClose, onLoadPolicy, onStartAuthoring }: T
     async (ref: PolicyRef) => {
       // CCNPs carry no namespace — their fetch path is cluster-scoped
       // (policyApiPath branches); the editor parses the manifest either way.
-      const yaml = await getClusterPolicyYaml({
-        kind: ref.kind,
-        namespace: ref.namespace || selected,
-        name: ref.name,
-      });
-      onLoadPolicy(yaml, `${ref.namespace || selected}/${ref.name}`);
+      try {
+        const yaml = await getClusterPolicyYaml({
+          kind: ref.kind,
+          namespace: ref.namespace || selected,
+          name: ref.name,
+        });
+        onLoadPolicy(yaml, `${ref.namespace || selected}/${ref.name}`);
+        // The new editor tab sits BEHIND this fullscreen overlay — close the
+        // board so the jump is visible instead of happening silently.
+        onClose();
+      } catch {
+        setError(String(t('topo-load-error')));
+      }
     },
-    [onLoadPolicy, selected],
+    [onLoadPolicy, selected, onClose, t],
   );
 
   const grouped = useMemo(() => {
