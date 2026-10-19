@@ -548,19 +548,23 @@ function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string)
     direction: Direction,
     validKeys: Set<string>,
     bucket: unknown[],
-  ): Endpoint[] => {
+  ): { endpoints: Endpoint[]; wildcard: boolean } => {
     const raw = asRecordArray(spec[direction]);
-    if (!raw) return [];
+    if (!raw) return { endpoints: [], wildcard: false };
     const out: Endpoint[] = [];
+    let wildcardSeen = false;
 
     for (const rule of raw) {
       const ownKeys = Object.keys(rule);
       if (ownKeys.length === 0) {
         // An empty rule object is Cilium's allowAll wildcard: it matches every
-        // source/destination, so it imports as an explicit "all" peer. (The
-        // deny-all direction is the KEY being absent — enforcement without
-        // rules — or an empty object in the ingressDeny list, not this.)
-        out.push(makeEndpoint('all', 'cluster', {}));
+        // source and destination — not just the cluster, EVERYTHING. A
+        // direction whose ONLY rules are wildcards is therefore plain
+        // allow-all (the badge state, no canvas rules — handled below); among
+        // concrete rules it acts as a catch-all, imported as an explicit "all"
+        // peer. (The deny-all direction is the KEY being absent — enforcement
+        // without rules — or an empty object in the ingressDeny list.)
+        wildcardSeen = true;
         continue;
       }
       if (!ownKeys.every(k => validKeys.has(k))) {
@@ -606,11 +610,25 @@ function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string)
       }
     }
 
-    return out;
+    if (!wildcardSeen) return { endpoints: out, wildcard: false };
+    if (out.length === 0) {
+      // Only wildcards: the direction is plainly allow-all — badge state,
+      // no rules. The wildcard flag keeps the direction DEFINED (enforced),
+      // so a bare-selector deny does not wrongly swallow it.
+      return { endpoints: [], wildcard: true };
+    }
+    // Wildcard as catch-all among concrete rules: an explicit "all" peer.
+    // Cilium's wildcard spans world too, but the canvas has no single shape
+    // for "everything"; cluster + world peers together approximate it.
+    out.push(makeEndpoint('all', 'cluster', {}));
+    out.push(makeEndpoint('all', 'outside', {}));
+    return { endpoints: out, wildcard: true };
   };
 
-  const ingress = parseRules('ingress', INGRESS_KEYS, unsupported.ingress);
-  const egress = parseRules('egress', EGRESS_KEYS, unsupported.egress);
+  const ingressParsed = parseRules('ingress', INGRESS_KEYS, unsupported.ingress);
+  const egressParsed = parseRules('egress', EGRESS_KEYS, unsupported.egress);
+  const ingress = ingressParsed.endpoints;
+  const egress = egressParsed.endpoints;
 
   // Deny sections: an empty deny rule object denies EVERYTHING in the
   // direction (the modelable "deny all"); anything else there is a selective
@@ -639,7 +657,8 @@ function parseCiliumSpec(spec: Record<string, unknown>, policyNamespace: string)
   const bareSelectorEnforcesBoth = ingress.length === 0 && egress.length === 0 &&
     unsupported.ingress.length === 0 && unsupported.egress.length === 0 &&
     (unsupported.ingressDeny?.length ?? 0) === 0 && (unsupported.egressDeny?.length ?? 0) === 0 &&
-    !denyAllIngress && !denyAllEgress; // an explicit deny rule defines that direction
+    !denyAllIngress && !denyAllEgress && // an explicit deny rule defines that direction
+    !ingressParsed.wildcard && !egressParsed.wildcard; // so does an allowAll wildcard
   const defaultDenyIngress = (ingress.length === 0 && unsupported.ingress.length === 0) &&
     (bareSelectorEnforcesBoth || denyAllIngress || (unsupported.ingressDeny?.length ?? 0) > 0);
   const defaultDenyEgress = (egress.length === 0 && unsupported.egress.length === 0) &&

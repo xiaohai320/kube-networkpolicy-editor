@@ -21,12 +21,14 @@ describe('cilium allow-all encoding', () => {
     expect(yaml).toContain('ingress:');
     expect(yaml).toContain('egress:');
     // Round trip: still allow-all in both directions, never a deny flag.
+    // The wildcards import as the allow-all badge state — the wildcard
+    // matches EVERYTHING (cluster, world, host, …), which is exactly what
+    // the badge means.
     const rt = parseCiliumYaml(yaml);
     expect(rt.specs[0]!.defaultDenyIngress).toBe(false);
     expect(rt.specs[0]!.defaultDenyEgress).toBe(false);
-    // The wildcards import as explicit all/cluster peers.
-    expect(rt.specs[0]!.ingress).toHaveLength(1);
-    expect(rt.specs[0]!.ingress[0]!.kind).toBe('all');
+    expect(rt.specs[0]!.ingress).toEqual([]);
+    expect(rt.specs[0]!.egress).toEqual([]);
   });
 
   it('default-deny ingress emits ingressDeny, never an allow wildcard', () => {
@@ -69,6 +71,47 @@ spec:
 `;
     const rt = parseCiliumYaml(yaml);
     expect(rt.specs[0]!.defaultDenyIngress).toBe(false);
+    expect(rt.specs[0]!.defaultDenyEgress).toBe(false);
+  });
+});
+
+describe('cilium allowAll wildcard parsing', () => {
+  it('wildcards among concrete rules import as catch-all cluster + world peers', () => {
+    const yaml = `apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mixed
+  namespace: demo
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:app": "web"
+    - {}
+`;
+    const rt = parseCiliumYaml(yaml);
+    const kinds = rt.specs[0]!.ingress.map(e => `${e.group}/${e.kind}`);
+    expect(kinds).toContain('cluster/all');
+    expect(kinds).toContain('outside/all');
+    expect(rt.specs[0]!.defaultDenyIngress).toBe(false);
+  });
+
+  it('wildcard-only direction is allow-all, never swallowed by bare-selector deny', () => {
+    const yaml = `apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: wildcard
+  namespace: demo
+spec:
+  endpointSelector: {}
+  ingress:
+    - {}
+`;
+    const rt = parseCiliumYaml(yaml);
+    expect(rt.specs[0]!.ingress).toEqual([]);
+    expect(rt.specs[0]!.defaultDenyIngress).toBe(false);
+    // egress: not defined by the spec → not enforced → allow-all
     expect(rt.specs[0]!.defaultDenyEgress).toBe(false);
   });
 });
