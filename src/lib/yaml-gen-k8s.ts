@@ -159,13 +159,16 @@ function policyTypesFor(spec: PolicySpec): string[] {
  * everything out: the defaulting silently turns "allow everything" into
  * "deny all ingress" on apply. There is no YAML for "this NetworkPolicy
  * selects pods and restricts nothing", so the generator instead pins ingress
- * open explicitly: an `ipBlock: 0.0.0.0/0` allow rule plus `policyTypes:
- * [Ingress]` (egress stays out of policyTypes, hence unrestricted). Round
- * trip the rule shows as an explicit allow rule — which is exactly what the
- * cluster now enforces.
+ * open explicitly: a peerless rule (`ingress: [{}]` — a rule with no `from`
+ * allows every source; verified live against the apiserver, which stores it
+ * verbatim) plus `policyTypes: [Ingress]` (egress stays out of policyTypes,
+ * hence unrestricted). Round trip the rule parses as all/outside — which is
+ * exactly what the cluster now enforces. (An earlier spelling pinned
+ * `ipBlock: 0.0.0.0/0`; the bare rule is the same effect, one notch less
+ * indirect.)
  */
 function pinnedAllowAllIngress(): { rule: K8sRule; id: string } {
-  return { rule: { from: [{ ipBlock: { cidr: ZERO_CIDR } }] }, id: ALLOW_ALL_PIN_ID };
+  return { rule: {}, id: ALLOW_ALL_PIN_ID };
 }
 
 /**

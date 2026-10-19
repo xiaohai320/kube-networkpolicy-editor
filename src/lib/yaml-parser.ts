@@ -241,9 +241,15 @@ function parseK8sPolicy(doc: K8sDocInput): PolicySpec {
       const ports = parsePorts(rule.ports as Array<Record<string, unknown>> | undefined);
       const peers = (rule[ruleKey] as K8sPeerInput[] | undefined) ?? [];
       if (peers.length === 0) {
-        // No peer but ports present: restrict every pod in the policy's own
-        // namespace — a `from`/`to` is what widens a rule to the cluster.
-        out.push(makeEndpoint('all', 'namespace', { ports }));
+        // A rule with NO `from` and NO ports is the allow-all spelling the
+        // generator pins (verified live: stored verbatim, allows every
+        // source). With ports but no peer, sources stay confined to the
+        // policy's own namespace — a `from` is what widens the rule.
+        if (ports.length === 0) {
+          out.push(makeEndpoint('all', 'outside', {}));
+        } else {
+          out.push(makeEndpoint('all', 'namespace', { ports }));
+        }
         continue;
       }
       for (const peer of peers) {

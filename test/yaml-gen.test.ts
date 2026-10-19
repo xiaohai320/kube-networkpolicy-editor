@@ -451,7 +451,9 @@ describe('generateK8sYaml', () => {
     // which would deny all ingress. The generator pins an explicit allow-all
     // ingress rule instead.
     expect(spec.policyTypes).toEqual(['Ingress']);
-    expect(JSON.stringify(spec.ingress)).toContain('0.0.0.0/0');
+    // A peerless rule — `ingress: [{}]` — allows every source; verified live
+    // against the apiserver (stored verbatim, traffic flows).
+    expect(spec.ingress).toEqual([{}]);
   });
 
   it('exports several specs as a multi-document stream', () => {
