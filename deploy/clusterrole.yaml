@@ -13,6 +13,14 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
     verbs: ["list"]
+  # Topology dashboard (read-only): pod list for aggregation + readiness.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Topology dashboard: clusterwide Cilium policies contribute paths too.
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumclusterwidenetworkpolicies"]
+    verbs: ["get", "list"]
   # Admin settings persist to this one ConfigMap (allowlist) + Secret
   # (password). Env self-patch was rejected: env is pod-template state and
   # rolling the pod on every save logged every user out.

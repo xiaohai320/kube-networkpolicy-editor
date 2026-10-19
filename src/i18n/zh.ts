@@ -300,5 +300,26 @@ export const zh = {
   'cluster-delete-result-summary': '已删除 {{deleted}} 条，失败 {{failed}} 条',
   'cluster-delete-result-failed-heading': '失败',
 
+  // 拓扑看板
+  'topo-title': '拓扑',
+  'topo-refresh': '刷新',
+  'topo-close': '关闭拓扑看板',
+  'topo-namespace': '命名空间',
+  'topo-loading': '拓扑加载中…',
+  'topo-load-error': '拓扑数据加载失败',
+  'topo-empty-title': '此命名空间暂无网络策略',
+  'topo-empty-body': '所有 Pod 均不受限制 —— 任意 Pod 可以访问任何目标，任何来源也可以访问这些 Pod。创建第一条策略以开始隔离。',
+  'topo-empty-cta': '创建第一条策略',
+  'topo-deny-ingress': '入站已全部拒绝',
+  'topo-deny-egress': '出站已全部拒绝',
+  'topo-world': '外部网络',
+  'topo-host': '主机',
+  'topo-kube-apiserver': 'kube-apiserver',
+  'topo-cidr': 'CIDR',
+  'topo-namespace-node': '命名空间',
+  'topo-detail-policies': '关联策略',
+  'topo-detail-none': '没有策略选中此工作负载',
+  'topo-load-editor': '载入编辑器',
+  'topo-not-ready': '该工作负载中部分 Pod 未就绪',
+}  satisfies Record<keyof typeof en, string>;
 
-} satisfies Record<keyof typeof en, string>;

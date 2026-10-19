@@ -49,7 +49,7 @@ export function isDevMode(): boolean {
 
 /** One entry of the cluster inventory list, before the full spec is fetched. */
 export interface ClusterPolicyRef {
-  kind: 'NetworkPolicy' | 'CiliumNetworkPolicy';
+  kind: 'NetworkPolicy' | 'CiliumNetworkPolicy' | 'CiliumClusterwideNetworkPolicy';
   namespace: string;
   name: string;
   /** Resource version, for display only — apply is server-side. */
@@ -101,7 +101,7 @@ function devHeaders(extra?: HeadersInit): HeadersInit {
   return h;
 }
 
-async function request(path: string, init?: RequestInit): Promise<Response> {
+export async function request(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(`/k8s/${path}`, { ...init, headers: devHeaders(init?.headers) });
   if (!res.ok) await parseStatus(res);
   return res;
@@ -159,14 +159,24 @@ export async function listClusterPolicies(): Promise<ClusterPolicyRef[]> {
 
 /** Fetch one policy's full manifest as YAML text (parsed by yaml-parser). */
 export async function getClusterPolicyYaml(ref: ClusterPolicyRef): Promise<string> {
-  const path =
-    ref.kind === 'NetworkPolicy'
-      ? `apis/networking.k8s.io/v1/namespaces/${ref.namespace}/networkpolicies/${ref.name}`
-      : `apis/cilium.io/v2/namespaces/${ref.namespace}/ciliumnetworkpolicies/${ref.name}`;
+  const path = policyApiPath(ref);
   const res = await request(path);
   const manifest = await res.json();
   // Re-serialize to YAML so the existing detectAndParse path handles it.
   return yamlDump(manifest);
+}
+
+/** Namespaced resource path of a policy ref, in the apiserver's own spelling.
+    CCNPs are cluster-scoped: no namespace segment. */
+function policyApiPath(ref: Pick<ClusterPolicyRef, 'kind' | 'namespace' | 'name'>): string {
+  switch (ref.kind) {
+    case 'NetworkPolicy':
+      return `apis/networking.k8s.io/v1/namespaces/${ref.namespace}/networkpolicies/${ref.name}`;
+    case 'CiliumClusterwideNetworkPolicy':
+      return `apis/cilium.io/v2/ciliumclusterwidenetworkpolicies/${ref.name}`;
+    default:
+      return `apis/cilium.io/v2/namespaces/${ref.namespace}/ciliumnetworkpolicies/${ref.name}`;
+  }
 }
 
 async function yamlDump(manifest: unknown): Promise<string> {

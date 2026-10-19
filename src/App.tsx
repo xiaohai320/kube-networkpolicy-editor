@@ -8,10 +8,11 @@ import { LocaleToggle } from '@/i18n/LocaleToggle';
 import { PolicyPageBar, type PolicyPage } from '@/components/ui/PolicyPageBar';
 import { ClusterPanel } from '@/components/cluster/ClusterPanel';
 import type { EditorState, ClusterSync } from '@/state/actions';
-import { Cloud, X, Users, LogOut } from 'lucide-react';
+import { Cloud, X, Users, LogOut, Map } from 'lucide-react';
 import { fetchMe, logout, type AuthMe } from '@/lib/auth-api';
 import { LoginPage } from '@/components/auth/LoginPage';
 import { UserAdminPanel } from '@/components/auth/UserAdminPanel';
+import { TopologyDashboard } from '@/components/topology/TopologyDashboard';
 import { useTranslation } from '@/i18n';
 import { initialState } from '@/state/reducer';
 import { BTN_TOOLBAR_TEXT } from '@/components/ui/button';
@@ -53,6 +54,7 @@ function clusterLoadedPage(yaml: string, label: string): PageData | undefined {
 function App() {
   const [splitPercent, setSplitPercent] = useState(60);
   const [clusterOpen, setClusterOpen] = useState(false);
+  const [topoOpen, setTopoOpen] = useState(false);
   const [authState, setAuthState] = useState<AuthMe | 'checking' | null>('checking');
   const [userAdminOpen, setUserAdminOpen] = useState(false);
   const [pages, setPages] = useState<PageData[]>(() => [createPage('Policy 1')]);
@@ -198,6 +200,14 @@ function App() {
         <div className="flex items-center gap-1 pr-2">
           <button
             className={BTN_TOOLBAR_TEXT}
+            onClick={() => setTopoOpen(true)}
+            aria-label={t('topo-title')}
+            title={t('topo-title')}
+          >
+            <Map size={14} />
+          </button>
+          <button
+            className={BTN_TOOLBAR_TEXT}
             onClick={() => setClusterOpen(o => !o)}
             aria-label={t('cluster-panel-title')}
           >
@@ -266,6 +276,16 @@ function App() {
         </PolicyProvider>
       </div>
       {userAdminOpen && <UserAdminPanel onClose={() => setUserAdminOpen(false)} />}
+      {topoOpen && (
+        <TopologyDashboard
+          onClose={() => setTopoOpen(false)}
+          onLoadPolicy={handleLoadFromCluster}
+          onStartAuthoring={() => {
+            setTopoOpen(false);
+            handleAddPage();
+          }}
+        />
+      )}
     </div>
   );
 }

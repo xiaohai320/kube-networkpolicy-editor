@@ -56,3 +56,19 @@ Cilium `toPorts[].rules.http[]` 中由 `method` + `path`（支持正则）组成
 ## 集群清单 (Cluster Inventory)
 
 懒加载的集群策略列表（kind / namespace / name）。先列清单，点开才拉取完整 spec 载入为一个编辑页签。删除操作从清单发起，支持复选多选。
+
+## 拓扑看板 (Topology Dashboard)
+
+只读的集群侧视图：对每个命名空间，从已有的 NetworkPolicy、CiliumNetworkPolicy（含 Clusterwide）推导出"谁允许连到谁"的图。与编辑器 (Policy 编辑) 互补——编辑器改一份策略，看板看全部策略合起来的效果。
+
+## 聚合节点 (Aggregated Node)
+
+拓扑图的节点。被同一组策略 selector 选中且同 owner（Deployment/StatefulSet/DaemonSet）的 pod 聚合为一个节点，标注实例数。图上永远不逐个画 pod。
+
+## 允许路径 (Allowed Path)
+
+两个节点之间存在至少一条策略允许的通信通路。看板只画允许路径；"被策略覆盖但默认拒绝"不画线，由节点上的**默认拒绝角标**表达。允许即绿线，与编辑器的视觉语言一致。
+
+## 特殊端点 (Special Endpoint)
+
+拓扑图中命名空间之外的通信端：世界 (world)、主机 (host)、kube-apiserver、CIDR 段、以及**其他命名空间**。各按类型聚合为一个节点；其他命名空间节点可点击跳转到那个命名空间的看板。

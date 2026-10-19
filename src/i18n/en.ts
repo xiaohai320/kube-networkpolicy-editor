@@ -302,5 +302,26 @@ export const en = {
   'cluster-delete-result-summary': '{{deleted}} deleted, {{failed}} failed',
   'cluster-delete-result-failed-heading': 'Failed',
 
+  // Topology dashboard (拓扑看板)
+  'topo-title': 'Topology',
+  'topo-refresh': 'Refresh',
+  'topo-close': 'Close topology dashboard',
+  'topo-namespace': 'Namespace',
+  'topo-loading': 'Loading topology…',
+  'topo-load-error': 'Failed to load topology data',
+  'topo-empty-title': 'No policies in this namespace',
+  'topo-empty-body': 'All pods are unrestricted — any pod can reach anything, and anything can reach these pods. Create the first policy to start isolating.',
+  'topo-empty-cta': 'Create first policy',
+  'topo-deny-ingress': 'All ingress denied',
+  'topo-deny-egress': 'All egress denied',
+  'topo-world': 'World',
+  'topo-host': 'Host',
+  'topo-kube-apiserver': 'kube-apiserver',
+  'topo-cidr': 'CIDR',
+  'topo-namespace-node': 'Namespace',
+  'topo-detail-policies': 'Affecting policies',
+  'topo-detail-none': 'No policy selects this workload',
+  'topo-load-editor': 'Load into editor',
+  'topo-not-ready': 'Some pods in this workload are not ready',
+}  as const;
 
-} as const;
