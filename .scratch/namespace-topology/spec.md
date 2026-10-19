@@ -1,6 +1,6 @@
 # Spec: Namespace Topology Dashboard (拓扑看板)
 
-Status: ready-for-agent
+Status: done (implemented 2026-10-19, commit 55f9cc3, deployed)
 
 ## Problem Statement
 
