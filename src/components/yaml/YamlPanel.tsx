@@ -3,8 +3,7 @@ import { Copy, Download, Upload, Check, CloudUpload, Loader2, AlertTriangle } fr
 import { usePolicyContext } from '@/state/context';
 import { importPolicy, setFormat, setClusterSync as setClusterSyncAction } from '@/state/actions';
 import { applyClusterPolicy, ClusterApiError } from '@/lib/cluster-api';
-import { generateK8sYamlMapped } from '@/lib/yaml-gen-k8s';
-import { generateCiliumYamlMapped } from '@/lib/yaml-gen-cilium';
+import { POLICY_FORMATS } from '@/lib/policy-format';
 import { useHoveredRule } from '@/lib/highlight-state';
 import { detectAndParse, PolicyParseError } from '@/lib/yaml-parser';
 import { sanitizeFilename } from '@/lib/utils';
@@ -30,10 +29,7 @@ export function YamlPanel() {
   const hoveredRuleId = useHoveredRule();
 
   const { yaml, activeRuleMap } = useMemo(() => {
-    const mapped =
-      activeTab === 'k8s'
-        ? generateK8sYamlMapped(state.policy)
-        : generateCiliumYamlMapped(state.policy);
+    const mapped = POLICY_FORMATS[activeTab].generate(state.policy);
     // Only the hovered rule's range lights up. The lookup must tolerate a
     // stale id: deleting the hovered row unmounts it without a mouseleave, so
     // the store can still name a rule the generator no longer emitted.
@@ -103,7 +99,7 @@ export function YamlPanel() {
       // `yaml` is the live generated text — identical to what the panel shows.
       const manifest = yaml;
       await applyClusterPolicy(
-        { kind: activeTab === 'k8s' ? 'NetworkPolicy' : 'CiliumNetworkPolicy', namespace: state.policy.namespace, name: state.policy.name },
+        { kind: POLICY_FORMATS[activeTab].kind, namespace: state.policy.namespace, name: state.policy.name },
         manifest,
         { force },
       );

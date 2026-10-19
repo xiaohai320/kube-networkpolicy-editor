@@ -18,6 +18,7 @@ import { initialState } from '@/state/reducer';
 import { BTN_TOOLBAR_TEXT } from '@/components/ui/button';
 import { createDefaultPolicy } from '@/types/policy';
 import { detectAndParse } from '@/lib/yaml-parser';
+import { kindOfFormat } from '@/lib/policy-format';
 import { generateId } from '@/lib/utils';
 
 interface PageData {
@@ -156,7 +157,7 @@ function App() {
   const openPages = useMemo(
     () =>
       pages.map(p => ({
-        kind: p.state.policy.format === 'cilium' ? 'CiliumNetworkPolicy' : 'NetworkPolicy',
+        kind: kindOfFormat(p.state.policy.format),
         namespace: p.state.policy.namespace,
         name: p.state.policy.name,
       })),

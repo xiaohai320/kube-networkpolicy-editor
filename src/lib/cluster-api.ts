@@ -49,13 +49,43 @@ export function isDevMode(): boolean {
 
 /** One entry of the cluster inventory list, before the full spec is fetched. */
 export interface ClusterPolicyRef {
-  kind: 'NetworkPolicy' | 'CiliumNetworkPolicy' | 'CiliumClusterwideNetworkPolicy';
+  kind: PolicyKind;
   namespace: string;
   name: string;
   /** Resource version, for display only — apply is server-side. */
   resourceVersion?: string;
   /** Managed by Fleet/Helm — deletion may be silently undone by re-creation. */
   managed?: boolean;
+}
+
+/** The kinds the inventory speaks, as the apiserver spells them. */
+export type PolicyKind = 'NetworkPolicy' | 'CiliumNetworkPolicy' | 'CiliumClusterwideNetworkPolicy';
+
+/** One table for every kind's API path: list root, and the namespaced /
+    cluster-scoped resource path. CCNPs are cluster-scoped — no namespace
+    segment. This used to be two switches (list + apply) that had already
+    drifted: the apply one lacked the CCNP branch entirely, so an imported
+    CCNP edited and re-applied would PATCH ciliumnetworkpolicies instead. */
+const KIND_PATHS: Record<PolicyKind, { list: string; resource: (ns: string, name: string) => string }> = {
+  NetworkPolicy: {
+    list: 'apis/networking.k8s.io/v1/networkpolicies',
+    resource: (ns, name) => `apis/networking.k8s.io/v1/namespaces/${ns}/networkpolicies/${name}`,
+  },
+  CiliumNetworkPolicy: {
+    list: 'apis/cilium.io/v2/ciliumnetworkpolicies',
+    resource: (ns, name) => `apis/cilium.io/v2/namespaces/${ns}/ciliumnetworkpolicies/${name}`,
+  },
+  CiliumClusterwideNetworkPolicy: {
+    list: 'apis/cilium.io/v2/ciliumclusterwidenetworkpolicies',
+    resource: (_ns, name) => `apis/cilium.io/v2/ciliumclusterwidenetworkpolicies/${name}`,
+  },
+};
+
+/** Namespaced / cluster-scoped resource path of one policy ref. */
+export function policyResourcePath(
+  ref: Pick<ClusterPolicyRef, 'kind' | 'namespace' | 'name'>,
+): string {
+  return KIND_PATHS[ref.kind].resource(ref.namespace, ref.name);
 }
 
 export class ClusterApiError extends Error {
@@ -75,19 +105,21 @@ function statusFallback(res: Response): string {
   return res.statusText || `HTTP ${res.status}`;
 }
 
-/** Read an error response once, deriving both reason and message. The body is
- * consumable only once, so everything shares this single read. */
-async function parseStatus(res: Response): Promise<never> {
-  let reason = 'Unknown';
-  let message = statusFallback(res);
+/** Read an error response's JSON body once, as { reason?, message? }. The
+ * body is consumable only once, so every failure path shares this read
+ * instead of each carrying its own try/catch variant. */
+async function readErrorBody(res: Response): Promise<{ reason?: string; message?: string }> {
   try {
-    const body = (await res.json()) as { reason?: string; message?: string };
-    if (body.reason) reason = body.reason;
-    if (body.message) message = body.message;
+    return (await res.json()) as { reason?: string; message?: string };
   } catch {
-    // Non-JSON error body — keep the fallback.
+    // Non-JSON error body — caller keeps the fallback.
+    return {};
   }
-  throw new ClusterApiError(res.status, reason, message);
+}
+
+async function parseStatus(res: Response): Promise<never> {
+  const body = await readErrorBody(res);
+  throw new ClusterApiError(res.status, body.reason ?? 'Unknown', body.message ?? statusFallback(res));
 }
 
 function devHeaders(extra?: HeadersInit): HeadersInit {
@@ -132,8 +164,8 @@ export function isManagedPolicy(item: Record<string, unknown>): boolean {
 /** List every network policy in the cluster, both kinds, minimal fields. */
 export async function listClusterPolicies(): Promise<ClusterPolicyRef[]> {
   const [np, cnp] = await Promise.all([
-    request('apis/networking.k8s.io/v1/networkpolicies').then(r => r.json()),
-    request('apis/cilium.io/v2/ciliumnetworkpolicies').then(r => r.json()),
+    request(KIND_PATHS.NetworkPolicy.list).then(r => r.json()),
+    request(KIND_PATHS.CiliumNetworkPolicy.list).then(r => r.json()),
   ]);
   const refs: ClusterPolicyRef[] = [];
   for (const item of ((np as { items?: unknown[] }).items ?? []) as Array<Record<string, unknown>>) {
@@ -159,24 +191,10 @@ export async function listClusterPolicies(): Promise<ClusterPolicyRef[]> {
 
 /** Fetch one policy's full manifest as YAML text (parsed by yaml-parser). */
 export async function getClusterPolicyYaml(ref: ClusterPolicyRef): Promise<string> {
-  const path = policyApiPath(ref);
-  const res = await request(path);
+  const res = await request(policyResourcePath(ref));
   const manifest = await res.json();
   // Re-serialize to YAML so the existing detectAndParse path handles it.
   return yamlDump(manifest);
-}
-
-/** Namespaced resource path of a policy ref, in the apiserver's own spelling.
-    CCNPs are cluster-scoped: no namespace segment. */
-function policyApiPath(ref: Pick<ClusterPolicyRef, 'kind' | 'namespace' | 'name'>): string {
-  switch (ref.kind) {
-    case 'NetworkPolicy':
-      return `apis/networking.k8s.io/v1/namespaces/${ref.namespace}/networkpolicies/${ref.name}`;
-    case 'CiliumClusterwideNetworkPolicy':
-      return `apis/cilium.io/v2/ciliumclusterwidenetworkpolicies/${ref.name}`;
-    default:
-      return `apis/cilium.io/v2/namespaces/${ref.namespace}/ciliumnetworkpolicies/${ref.name}`;
-  }
 }
 
 async function yamlDump(manifest: unknown): Promise<string> {
@@ -241,7 +259,13 @@ export async function applyClusterPolicy(
   ) as Array<Record<string, unknown>>;
   for (const doc of docs) {
     const meta = (doc.metadata ?? {}) as Record<string, string>;
-    const kind = doc.kind === 'CiliumNetworkPolicy' ? 'CiliumNetworkPolicy' : 'NetworkPolicy';
+    // The document's own kind decides the API path — a CCNP must not be
+    // PATCHed against the namespaced ciliumnetworkpolicies collection.
+    const kind = doc.kind === 'CiliumClusterwideNetworkPolicy'
+      ? 'CiliumClusterwideNetworkPolicy'
+      : doc.kind === 'CiliumNetworkPolicy'
+        ? 'CiliumNetworkPolicy'
+        : 'NetworkPolicy';
     const namespace = meta.namespace ?? ref.namespace;
     const name = meta.name ?? ref.name;
     await applyOne({ kind, namespace, name }, await yamlDump(doc), opts.force ?? false);
@@ -254,19 +278,12 @@ async function applyOne(
   docYaml: string,
   force: boolean,
 ): Promise<void> {
-  const res = await fetch(`/k8s/${resourcePath(ref)}?fieldManager=netpol-editor&force=${force}`, {
+  const res = await fetch(`/k8s/${policyResourcePath(ref)}?fieldManager=netpol-editor&force=${force}`, {
     method: 'PATCH',
     headers: devHeaders({ 'content-type': 'application/apply-patch+yaml' }),
     body: docYaml,
   });
   if (!res.ok) await parseStatus(res);
-}
-
-/** Namespaced resource path of a policy ref, in the apiserver's own spelling. */
-function resourcePath(ref: Pick<ClusterPolicyRef, 'kind' | 'namespace' | 'name'>): string {
-  return ref.kind === 'NetworkPolicy'
-    ? `apis/networking.k8s.io/v1/namespaces/${ref.namespace}/networkpolicies/${ref.name}`
-    : `apis/cilium.io/v2/namespaces/${ref.namespace}/ciliumnetworkpolicies/${ref.name}`;
 }
 
 /** Outcome of a best-effort batch delete. */
@@ -283,7 +300,7 @@ export interface DeleteReport {
 export async function deleteClusterPolicies(refs: ClusterPolicyRef[]): Promise<DeleteReport> {
   const report: DeleteReport = { deleted: 0, failed: [] };
   for (const ref of refs) {
-    const res = await fetch(`/k8s/${resourcePath(ref)}`, {
+    const res = await fetch(`/k8s/${policyResourcePath(ref)}`, {
       method: 'DELETE',
       headers: devHeaders(),
     }).catch(() => undefined);
@@ -295,15 +312,8 @@ export async function deleteClusterPolicies(refs: ClusterPolicyRef[]): Promise<D
       report.deleted += 1;
       continue;
     }
-    // Same single-read error extraction as every other failure path.
-    let message = statusFallback(res);
-    try {
-      const body = (await res.json()) as { message?: string };
-      if (body.message) message = body.message;
-    } catch {
-      // Non-JSON body — keep the fallback.
-    }
-    report.failed.push({ ref, message });
+    const body = await readErrorBody(res);
+    report.failed.push({ ref, message: body.message ?? statusFallback(res) });
   }
   return report;
 }

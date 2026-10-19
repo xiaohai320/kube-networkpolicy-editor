@@ -14,8 +14,3 @@ export function PolicyKindBadge({ kind }: { kind: 'NetworkPolicy' | 'CiliumNetwo
     </span>
   );
 }
-
-/** The kind as the inventory spells it, derived from a policy format. */
-export function kindOfFormat(format: string): 'NetworkPolicy' | 'CiliumNetworkPolicy' {
-  return format === 'cilium' ? 'CiliumNetworkPolicy' : 'NetworkPolicy';
-}
