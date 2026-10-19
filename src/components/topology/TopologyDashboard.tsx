@@ -5,6 +5,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { TopologyCanvas } from './TopologyCanvas';
 import {
   buildTopologyGraph,
+  policiesForNamespace,
   selectorMatches,
   workloadNodeId,
   type EngineSpec,
@@ -149,9 +150,8 @@ export function TopologyDashboard({ onClose, onLoadPolicy, onStartAuthoring }: T
       const labelsList = data.pods
         .filter(p => workloadNodeId(p.workload ?? p.name) === id)
         .map(p => p.labels);
-      const nodeRefs = data.policies.filter(p =>
-        p.specs.some(s => specAppliesToNode(s, labelsList)),
-      );
+      const nodeRefs = policiesForNamespace(data.policies, selected, data.namespaceLabels)
+        .filter(p => p.specs.some(s => specAppliesToNode(s, labelsList)));
       if (nodeRefs.length === 0) {
         setDrawer({ title: node.label, policies: [], nodeRefs: [] });
         return;
@@ -321,11 +321,9 @@ function PolicyRow({ ref, onLoad }: { ref: PolicyRef; onLoad: () => void }) {
   );
 }
 
-/** Same predicate the engine applies: endpointSelector matches ANY pod of
-    the node, and a CCNP's namespace scope counts as matching when absent or
-    empty (every namespace). A contentful CCNP scope can't be fully re-checked
-    here without the ns labels — the board already drew it, so the drawer must
-    not contradict the graph. */
+/** Same predicate the engine applies to a spec: the endpointSelector matches
+    ANY pod of the node. CCNP namespace scoping was already applied upstream by
+    policiesForNamespace (with the ns labels), so no re-check here. */
 function specAppliesToNode(
   spec: EngineSpec,
   labelsList: Array<Record<string, string>>,

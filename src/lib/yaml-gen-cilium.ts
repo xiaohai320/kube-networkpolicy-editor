@@ -283,13 +283,16 @@ function specToCilium(spec: PolicySpec, policy: Policy): SpecCilium {
 
   // The CRD's anyOf requires at least one of ingress/egress/ingressDeny/
   // egressDeny on the spec. Two cases still produce none:
-  //   - both directions allow-all (nothing to write): the empty rule objects
-  //     below are allowAll wildcards — they pass anyOf AND genuinely allow
+  //   - both directions allow-all (nothing to write): the empty rule object
+  //     below is an allowAll wildcard — it passes anyOf AND genuinely allows
   //     everything, even when another policy turns enforcement on.
   //   - (deny-all both is handled above: both deny keys are emitted.)
+  // Only INGRESS gets the wildcard, and only because anyOf forces SOMETHING:
+  // emitting egress too would silently define (enforce) egress on a policy
+  // that never had it — an allow-all ingress CNP would open egress on a pure
+  // open/save cycle. Ingress is the conventional side for the marker.
   if (!('ingress' in out) && !('egress' in out) && !('ingressDeny' in out) && !('egressDeny' in out)) {
     out.ingress = [{}];
-    out.egress = [{}];
   }
 
   return { spec: out, unsupported, ruleIds };

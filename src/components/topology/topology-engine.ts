@@ -194,19 +194,25 @@ export function isEmptySelector(sel: EngineSelector | undefined): boolean {
 /**
  * Which policies apply to a namespace: its own plus every CCNP whose
  * endpoint namespaceSelector (absent or empty = all) matches the ns labels.
+ * Per-SPEC scoping for CCNPs: one spec may scope to `env=prod` namespaces
+ * while a sibling spec of the same policy is unscoped — including the whole
+ * policy because ANY spec matches would drag the unscoped spec's rules into
+ * namespaces it never targeted. Kept specs are a filtered shallow copy, so
+ * the caller's fetched data is never mutated.
  */
 export function policiesForNamespace(
   all: PolicyRef[],
   namespace: string,
   nsLabels: Record<string, string> = {},
 ): PolicyRef[] {
-  return all.filter(p => {
-    if (p.kind !== 'CiliumClusterwideNetworkPolicy') return p.namespace === namespace;
-    return p.specs.some(spec => {
+  return all.flatMap(p => {
+    if (p.kind !== 'CiliumClusterwideNetworkPolicy') return p.namespace === namespace ? [p] : [];
+    const specs = p.specs.filter(spec => {
       const nsSel = spec.namespaceSelector;
       if (!nsSel || isEmptySelector(nsSel)) return true;
       return selectorMatches(nsSel, nsLabels);
     });
+    return specs.length > 0 ? [{ ...p, specs }] : [];
   });
 }
 
@@ -361,20 +367,23 @@ export function buildTopologyGraph(
     }
   }
 
-  // Default-deny badges: a workload node is deny-ingress when ≥1 applied
-  // policy selects it and EVERY applied spec ENFORCES ingress with no allows
-  // (K8s: policyTypes includes Ingress; Cilium: an ingress key is present).
-  // A direction that isn't enforced gets no badge — an egress-capable pod
-  // must not read as egress-restricted.
+  // Default-deny badges: a workload node is deny-ingress when, among the
+  // SPECS that actually select its pods, EVERY one enforces the direction
+  // (K8s: policyTypes includes it; Cilium: a direction key is present) with
+  // no allow rules. The check is per-spec, not per-policy: a policy can
+  // carry both a denying spec (selecting this node) and a rule-carrying spec
+  // (selecting other pods), and the latter must not hide the badge. A
+  // direction that isn't enforced anywhere gets no badge — an egress-capable
+  // pod must not read as egress-restricted.
   for (const node of nodes) {
     if (node.type !== 'workload') continue;
     const labelsList = podLabelsByNode.get(node.id) ?? [];
-    const applied = policies.filter(p =>
-      p.specs.some(s => labelsList.some(labels => selectorMatches(s.endpointSelector, labels))),
+    const selectingSpecs = policies.flatMap(p =>
+      p.specs.filter(s => labelsList.some(labels => selectorMatches(s.endpointSelector, labels))),
     );
-    if (applied.length === 0) continue;
-    if (applied.every(p => policyDeniesAll(p, 'ingress'))) node.denyIngress = true;
-    if (applied.every(p => policyDeniesAll(p, 'egress'))) node.denyEgress = true;
+    if (selectingSpecs.length === 0) continue;
+    if (selectingSpecs.every(s => specDeniesAll(s, 'ingress'))) node.denyIngress = true;
+    if (selectingSpecs.every(s => specDeniesAll(s, 'egress'))) node.denyEgress = true;
   }
 
   // Special endpoints join last so workload nodes keep their order; peers
@@ -383,15 +392,19 @@ export function buildTopologyGraph(
   return { nodes, edges: [...edges.values()], empty: false };
 }
 
-/** True when a policy denies ALL traffic in one direction: every spec that
-    applies ENFORCES the direction (policyTypes / Cilium key presence) and
-    carries no allow rule for it. */
+/** True when a policy denies ALL traffic in one direction: every spec ENFORCES
+    the direction (policyTypes / Cilium rule presence) and carries no allow
+    rule for it. */
 export function policyDeniesAll(p: PolicyRef, direction: 'ingress' | 'egress'): boolean {
-  return p.specs.every(s => {
-    const enforced = direction === 'ingress' ? s.enforcedIngress : s.enforcedEgress;
-    const rules = direction === 'ingress' ? s.ingress : s.egress;
-    return enforced && rules.length === 0;
-  });
+  return p.specs.every(s => specDeniesAll(s, direction));
+}
+
+/** Spec-level deny-all: the direction is enforced (deny-by-default once
+    selected) and no allow rule widens it. */
+export function specDeniesAll(s: EngineSpec, direction: 'ingress' | 'egress'): boolean {
+  const enforced = direction === 'ingress' ? s.enforcedIngress : s.enforcedEgress;
+  const rules = direction === 'ingress' ? s.ingress : s.egress;
+  return enforced && rules.length === 0;
 }
 
 /** Stable edge id, canonically ordered so A→B and B→A collide. */

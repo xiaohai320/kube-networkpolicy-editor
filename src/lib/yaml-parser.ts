@@ -263,13 +263,20 @@ function parseK8sPolicy(doc: K8sDocInput): PolicySpec {
   // `policyTypes` makes deny-by-default intrinsic, so a direction carrying
   // rules is already restricted. Only a ruleless direction with its policyType
   // is an explicit "deny everything".
+  //
+  // An omitted (or empty) policyTypes is DEFAULTED by the apiserver before
+  // storage — [Ingress] always, plus [Egress] iff egress rules exist — so a
+  // stored bare-spec NP denies all ingress on the cluster regardless of what
+  // its YAML omits. The parser models that defaulting so an imported policy
+  // shows the state the cluster actually enforces.
+  const defaulted = policyTypes.size === 0;
   return {
     id: generateId(),
     endpointSelector: parseSelector(asObject(spec.podSelector) ?? asObject(spec.endpointSelector)),
     ingress,
     egress,
-    defaultDenyIngress: policyTypes.has('Ingress') && ingress.length === 0,
-    defaultDenyEgress: policyTypes.has('Egress') && egress.length === 0,
+    defaultDenyIngress: (policyTypes.has('Ingress') || defaulted) && ingress.length === 0,
+    defaultDenyEgress: (policyTypes.has('Egress') || (defaulted && egress.length > 0)) && egress.length === 0,
   };
 }
 
@@ -750,7 +757,10 @@ function loadAllDocs(yamlString: string): Array<Record<string, unknown>> {
 
 function detectFormat(doc: Record<string, unknown>): PolicyFormat | null {
   switch (doc.kind) {
+    // CCNPs share the CNP schema — the same parser handles both. (CCNPs are
+    // cluster-scoped, so their namespace is usually absent and defaults.)
     case 'CiliumNetworkPolicy':
+    case 'CiliumClusterwideNetworkPolicy':
       return 'cilium';
     case 'NetworkPolicy':
       return 'k8s';

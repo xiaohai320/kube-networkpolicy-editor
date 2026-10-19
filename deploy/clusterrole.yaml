@@ -17,6 +17,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
+  # Topology dashboard: namespace inventory (dropdown incl. zero-policy ns)
+  # and namespace labels for CCNP namespaceSelector scoping.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
   # Topology dashboard: clusterwide Cilium policies contribute paths too.
   - apiGroups: ["cilium.io"]
     resources: ["ciliumclusterwidenetworkpolicies"]

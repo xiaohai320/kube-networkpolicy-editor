@@ -128,6 +128,25 @@ describe('policiesForNamespace', () => {
     expect(kept).toHaveLength(2);
     expect(policiesForNamespace(all, 'app', { team: 'x' })).toHaveLength(3);
   });
+
+  it('filters CCNP SPECS: an unscoped sibling spec must not drag a scoped policy in', () => {
+    const all = [
+      ref({
+        kind: 'CiliumClusterwideNetworkPolicy', namespace: '', name: 'multi',
+        specs: [
+          spec({}), // unscoped — applies everywhere
+          { ...spec({}), namespaceSelector: { matchLabels: { team: 'x' } } }, // scoped elsewhere
+        ],
+      }),
+    ];
+    // team:y namespace: only the unscoped spec applies — the scoped sibling
+    // (selecting other pods) must not come along, or its rules would widen
+    // the board. The kept ref must be a filtered copy, not the original.
+    const kept = policiesForNamespace(all, 'app', { team: 'y' });
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.specs).toHaveLength(1);
+    expect(kept[0]).not.toBe(all[0]);
+  });
 });
 
 describe('adaptPolicy — raw apiserver spellings', () => {
@@ -542,6 +561,40 @@ describe('buildTopologyGraph', () => {
 describe('edgeId', () => {
   it('is symmetric', () => {
     expect(edgeId('a', 'b')).toBe(edgeId('b', 'a'));
+  });
+});
+
+describe('specDeniesAll / default-deny badges', () => {
+  it('badges per-spec: a sibling spec selecting other pods must not hide a deny', () => {
+    // S1 selects app=web with no rules (deny-ingress for web); S2 selects
+    // app=db and carries rules. The old per-policy check failed p.specs.every
+    // on S2 and left web unbadged.
+    const pods = [pod('web-1', { app: 'web' }, 'web'), pod('db-1', { app: 'db' }, 'db')];
+    const policies = [
+      ref({
+        name: 'mixed',
+        specs: [
+          spec({ app: 'web' }, [], [], true, false),
+          spec({ app: 'db' }, [toWorld], [], true, false),
+        ],
+      }),
+    ];
+    const g = buildTopologyGraph('app', pods, policies);
+    const web = g.nodes.find(n => n.label === 'web');
+    const db = g.nodes.find(n => n.label === 'db');
+    expect(web?.denyIngress).toBe(true);
+    expect(db?.denyIngress).toBeFalsy(); // its selecting spec allows world
+  });
+
+  it('badges only when every selecting spec enforces-and-is-ruleless', () => {
+    const pods = [pod('web-1', { app: 'web' }, 'web')];
+    const policies = [
+      ref({ name: 'a', specs: [spec({ app: 'web' }, [], [], true, false)] }),
+      ref({ name: 'b', specs: [spec({ app: 'web' }, [toWorld], [], true, false)] }),
+    ];
+    const g = buildTopologyGraph('app', pods, policies);
+    // b allows world, so ingress is not fully denied despite a.
+    expect(g.nodes.find(n => n.label === 'web')?.denyIngress).toBeFalsy();
   });
 });
 

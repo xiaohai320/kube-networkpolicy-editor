@@ -124,8 +124,10 @@ describe('generateCiliumYaml', () => {
     // The unrepresentable direction is omitted. The CRD's anyOf then requires
     // SOMETHING on the spec — the fallback emits allowAll wildcards, which
     // honestly allow all (the FQDN rule never existed in the direction anyway).
+    // Only ingress gets the anyOf wildcard: emitting egress too would define
+    // (enforce) egress the policy never had.
     expect(spec.ingress).toEqual([{}]);
-    expect(spec.egress).toEqual([{}]);
+    expect(spec.egress).toBeUndefined();
   });
 
   it('does not let an unrepresentable rule deny the rest of the direction', () => {

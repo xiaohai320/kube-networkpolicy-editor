@@ -242,6 +242,18 @@ function ciliumNamespaceScope(sel: Record<string, unknown> | undefined): {
   return out;
 }
 
+/** Sole namespace name from a `kubernetes.io/metadata.name In [x]`
+    matchExpression, if present. Multiple values target several namespaces —
+    not drawable as one node — so they stay unresolvable. */
+function matchExpressionName(
+  exprs: Array<{ key: string; operator: string; values?: string[] }> | undefined,
+): string | undefined {
+  const e = exprs?.find(
+    x => x.key === NAMESPACE_NAME_LABEL && x.operator === 'In' && (x.values?.length ?? 0) === 1,
+  );
+  return e?.values?.[0];
+}
+
 /** Map one K8s peer to an engine endpoint (or undefined when unresolvable). */
 function k8sPeerToEndpoint(peer: RawK8sPeer, boardNamespace: string): EngineEndpoint | undefined {
   const ipBlock = peer.ipBlock;
@@ -254,7 +266,10 @@ function k8sPeerToEndpoint(peer: RawK8sPeer, boardNamespace: string): EngineEndp
   if (peer.namespaceSelector !== undefined) {
     // Namespace-scoped peer. `namespaceSelector: {}` = every namespace —
     // not drawable as one node on a per-namespace board.
-    const name = nsSel.matchLabels?.[NAMESPACE_NAME_LABEL];
+    // The namespace name can also arrive as a matchExpression —
+    // `kubernetes.io/metadata.name In [x]` — the common authoring spelling
+    // from label pickers; a single In value resolves just like the label.
+    const name = nsSel.matchLabels?.[NAMESPACE_NAME_LABEL] ?? matchExpressionName(nsSel.matchExpressions);
     const hasContent = Object.keys(nsSel.matchLabels ?? {}).length > 1 ||
       (nsSel.matchExpressions ?? []).length > 0;
     if (!name && hasContent) return undefined;
@@ -335,13 +350,16 @@ export function adaptPolicy(
   const specs: PolicyRef['specs'] = specsRaw.map(raw => {
     if (isK8s) {
       const spec = raw as unknown as RawK8sSpec;
+      // K8s: a direction not in policyTypes is not enforced. With policyTypes
+      // omitted (or empty), the apiserver DEFAULTS it before storing —
+      // verified on this cluster (v1.35): [Ingress] always, plus [Egress] iff
+      // the spec has egress rules. The adapter models that defaulting so a
+      // stored bare-spec NP reads back as what the cluster actually
+      // enforces, not as what the YAML happened to omit.
       const policyTypes = new Set(spec.policyTypes ?? []);
-      // K8s: a direction not in policyTypes is not enforced at all. With no
-      // policyTypes, the direction with rules is enforced (implicit deny).
-      const implicitIngress = spec.ingress !== undefined;
-      const implicitEgress = spec.egress !== undefined;
-      const enforcedIngress = policyTypes.has('Ingress') || (policyTypes.size === 0 && implicitIngress);
-      const enforcedEgress = policyTypes.has('Egress') || (policyTypes.size === 0 && implicitEgress);
+      const defaulted = policyTypes.size === 0;
+      const enforcedIngress = policyTypes.has('Ingress') || defaulted;
+      const enforcedEgress = policyTypes.has('Egress') || (defaulted && (spec.egress?.length ?? 0) > 0);
 
       const ingress: EngineEndpoint[] = [];
       for (const rule of spec.ingress ?? []) {

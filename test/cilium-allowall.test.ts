@@ -18,8 +18,10 @@ describe('cilium allow-all encoding', () => {
     const policy = createDefaultPolicy({ format: 'cilium' });
     policy.namespace = 'demo';
     const yaml = generateCiliumYaml(policy);
+    // Only ingress needs the wildcard — anyOf asks for ONE list. Adding
+    // egress as well would define (enforce) egress the policy never had.
     expect(yaml).toContain('ingress:');
-    expect(yaml).toContain('egress:');
+    expect(yaml).not.toContain('egress:');
     // Round trip: still allow-all in both directions, never a deny flag.
     // The wildcards import as the allow-all badge state — the wildcard
     // matches EVERYTHING (cluster, world, host, …), which is exactly what

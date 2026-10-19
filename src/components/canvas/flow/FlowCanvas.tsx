@@ -216,8 +216,15 @@ function FlowGraph() {
         proOptions={{ hideAttribution: true }}
         minZoom={0.3}
         maxZoom={1.5}
-      onMoveStart={() => {
-        userMovedViewport.current = true;
+      onMoveStart={(event, viewport) => {
+        // Programmatic moves (the initial fitView, the resize refit) also
+        // arrive here — d3-zoom dispatches 'start' with a null event, which
+        // RF's internal-only guard lets through. Only a USER gesture — d3
+        // wraps the real DOM event as sourceEvent — takes over the viewport.
+        if (event && 'sourceEvent' in event && event.sourceEvent) {
+          void viewport;
+          userMovedViewport.current = true;
+        }
       }}
     >
         {/* The Background paints --xy-background-color as a solid fill (RF's
