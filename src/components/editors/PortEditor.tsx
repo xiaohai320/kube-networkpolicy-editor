@@ -4,13 +4,12 @@ import {
   getCoreRowModel,
   flexRender,
   type ColumnDef,
-  type Row,
 } from '@tanstack/react-table';
 import { Plus, X } from 'lucide-react';
 import { generateId } from '@/lib/utils';
 import { validatePort } from '@/lib/validators';
 import { tr, useTranslation, type Msg, type TFunc } from '@/i18n';
-import type { HttpL7Rule, PortRule, Protocol } from '@/types/policy';
+import type { PortRule, Protocol } from '@/types/policy';
 import { BTN_ADD, BTN_ROW_REMOVE } from '../ui/button';
 
 interface PortRow extends PortRule {
@@ -20,39 +19,6 @@ interface PortRow extends PortRule {
 interface PortEditorProps {
   ports: PortRule[];
   onChange: (ports: PortRule[]) => void;
-}
-
-/** A port row plus, when the port carries one, its HTTP filter row. */
-function HttpRowGroup({
-  row,
-  cells,
-  setHttp,
-  t,
-}: {
-  row: Row<PortRow>;
-  cells: React.ReactNode[];
-  setHttp: (rowIndex: number, http?: HttpL7Rule) => void;
-  t: TFunc;
-}) {
-  return (
-    <>
-      <tr key={row.id}>
-        {cells.map((cell, i) => (
-          <td key={i} className="pr-1 py-0.5">
-            {cell}
-          </td>
-        ))}
-      </tr>
-      {row.original.http && (
-        <HttpFilterRow
-          http={row.original.http}
-          onChange={http => setHttp(row.index, http)}
-          onRemove={() => setHttp(row.index, undefined)}
-          t={t}
-        />
-      )}
-    </>
-  );
 }
 
 interface TableMeta {
@@ -138,81 +104,11 @@ function buildColumns(t: TFunc): ColumnDef<PortRow, unknown>[] {
   ];
 }
 
-import { HTTP_METHODS } from '@/types/policy';
-
-/** One-row editor for the port's optional HTTP L7 filter (method + path). */
-function HttpFilterRow({
-  http,
-  onChange,
-  onRemove,
-  t,
-}: {
-  http: HttpL7Rule;
-  onChange: (http: HttpL7Rule) => void;
-  onRemove: () => void;
-  t: TFunc;
-}) {
-  // Local draft + commit on blur, mirroring the port cell: the parent's
-  // effect resets row ids whenever the ports prop changes, so committing per
-  // keystroke would remount this row and drop focus mid-word.
-  const [method, setMethod] = useState(http.method ?? '');
-  const [path, setPath] = useState(http.path ?? '');
-  useEffect(() => {
-    setMethod(http.method ?? '');
-    setPath(http.path ?? '');
-  }, [http]);
-  const commit = (m: string, p: string) =>
-    onChange({
-      ...(m ? { method: m } : {}),
-      ...(p ? { path: p } : {}),
-    });
-  return (
-    <tr>
-      <td colSpan={4} className="py-0.5">
-        <div className="flex items-center gap-1 text-xs bg-canvas/40 rounded px-1 py-0.5">
-          <span className="text-[10px] font-mono text-text-secondary">http</span>
-          <select
-            className="bg-transparent border border-card-border rounded px-1 py-0.5 text-xs"
-            value={method}
-            onChange={e => {
-              setMethod(e.target.value);
-              commit(e.target.value, path);
-            }}
-            aria-label={t('header-method')}
-          >
-            <option value="">—</option>
-            {HTTP_METHODS.map(m => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <input
-            className="bg-transparent border border-card-border rounded px-1 py-0.5 text-xs flex-1 min-w-0 font-mono"
-            value={path}
-            placeholder="/path or /api/.*"
-            onChange={e => setPath(e.target.value)}
-            onBlur={() => commit(method, path)}
-            aria-label={t('header-path')}
-          />
-          <button className={BTN_ROW_REMOVE} onClick={onRemove} aria-label={t('action-remove')}>
-            <X size={12} />
-          </button>
-        </div>
-      </td>
-    </tr>
-  );
-}
-
 function toPortRules(rows: PortRow[]): PortRule[] {
-  return rows.map(row => {
-    const http = row.http && (row.http.method || row.http.path) ? row.http : undefined;
-    return {
-      port: typeof row.port === 'string' && /^\d+$/.test(row.port) ? Number(row.port) : row.port,
-      protocol: row.protocol,
-      ...(http ? { http } : {}),
-    };
-  });
+  return rows.map(row => ({
+    port: typeof row.port === 'string' && /^\d+$/.test(row.port) ? Number(row.port) : row.port,
+    protocol: row.protocol,
+  }));
 }
 
 export function PortEditor({ ports, onChange }: PortEditorProps) {
@@ -258,17 +154,6 @@ export function PortEditor({ ports, onChange }: PortEditorProps) {
     ]);
   }, []);
 
-  const setHttp = useCallback(
-    (rowIndex: number, http?: HttpL7Rule) => {
-      setData(prev => {
-        const next = prev.map((row, i) => (i === rowIndex ? { ...row, http } : row));
-        onChange(toPortRules(next));
-        return next;
-      });
-    },
-    [onChange],
-  );
-
   const table = useReactTable({
     data,
     columns,
@@ -283,13 +168,13 @@ export function PortEditor({ ports, onChange }: PortEditorProps) {
         <table className="w-full">
           <tbody>
             {table.getRowModel().rows.map(row => (
-              <HttpRowGroup
-                key={row.id}
-                row={row}
-                cells={row.getVisibleCells().map(cell => flexRender(cell.column.columnDef.cell, cell.getContext()))}
-                setHttp={setHttp}
-                t={t}
-              />
+              <tr key={row.id}>
+                {row.getVisibleCells().map((cell, i) => (
+                  <td key={i} className="pr-1 py-0.5">
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
             ))}
           </tbody>
         </table>

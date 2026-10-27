@@ -13,10 +13,9 @@ interface PolicyPageBarProps {
   onSelect: (id: string) => void;
   onAdd: () => void;
   onRemove: (id: string) => void;
-  onRename: (id: string, label: string) => void;
 }
 
-export function PolicyPageBar({ pages, activeId, onSelect, onAdd, onRemove, onRename }: PolicyPageBarProps) {
+export function PolicyPageBar({ pages, activeId, onSelect, onAdd, onRemove }: PolicyPageBarProps) {
   const { t } = useTranslation();
 
   return (
@@ -31,24 +30,10 @@ export function PolicyPageBar({ pages, activeId, onSelect, onAdd, onRemove, onRe
           }`}
           onClick={() => onSelect(page.id)}
         >
-          <span
-            contentEditable
-            suppressContentEditableWarning
-            spellCheck={false}
-            className="outline-none min-w-[40px]"
-            onBlur={e => {
-              const text = e.currentTarget.textContent?.trim();
-              if (text && text !== page.label) {
-                onRename(page.id, text);
-              }
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                (e.target as HTMLSpanElement).blur();
-              }
-            }}
-          >
+          {/* The label mirrors the policy's namespace/name (App keeps it in
+              sync) — not editable: a manual rename would be clobbered by the
+              next policy edit. */}
+          <span className="outline-none min-w-[40px] font-mono text-xs">
             {page.label}
           </span>
           {pages.length > 1 && (

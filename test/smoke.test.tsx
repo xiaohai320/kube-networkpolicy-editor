@@ -64,18 +64,22 @@ describe('<App/>', () => {
   it('closes the active tab and falls back to a sibling without blanking', async () => {
     render(<App />);
     await screen.findByText('Ingress Sources');
+    // Tabs read as the policy identity: namespace/name.
+    const tabOf = (name: string) => screen.getAllByText(name);
+    expect(tabOf('default/policy-1')).toHaveLength(1);
+
     // One initial tab; add one more, then close the active one.
     fireEvent.click(screen.getByLabelText('Add new policy page'));
-    expect(screen.getAllByText(/Policy \d/).length).toBe(2);
+    expect(screen.getAllByText(/default\/policy-\d/).length).toBe(2);
 
     // The active tab is the newest; its close button is visible on hover.
-    const activeTab = screen.getAllByText(/Policy \d/).at(-1)!.closest('div')!;
+    const activeTab = screen.getAllByText(/default\/policy-\d/).at(-1)!.closest('div')!;
     const closeBtn = activeTab.querySelector('button[aria-label^="Delete"]')!;
     expect(closeBtn).not.toBeNull();
     fireEvent.click(closeBtn);
 
     // The bar still shows the remaining tab, and the canvas still renders.
-    expect(screen.getAllByText(/Policy \d/).length).toBe(1);
+    expect(screen.getAllByText(/default\/policy-\d/).length).toBe(1);
     expect(screen.getByText('Ingress Sources')).toBeInTheDocument();
     expect(screen.getByText('Cilium Network Policy')).toBeInTheDocument();
   });

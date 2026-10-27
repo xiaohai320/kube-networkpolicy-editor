@@ -8,11 +8,12 @@ import { LocaleToggle } from '@/i18n/LocaleToggle';
 import { PolicyPageBar, type PolicyPage } from '@/components/ui/PolicyPageBar';
 import { ClusterPanel } from '@/components/cluster/ClusterPanel';
 import type { EditorState, ClusterSync } from '@/state/actions';
-import { Cloud, X, Users, LogOut, Map } from 'lucide-react';
+import { Cloud, X, Users, LogOut } from 'lucide-react';
 import { fetchMe, logout, type AuthMe } from '@/lib/auth-api';
 import { LoginPage } from '@/components/auth/LoginPage';
 import { UserAdminPanel } from '@/components/auth/UserAdminPanel';
-import { TopologyDashboard } from '@/components/topology/TopologyDashboard';
+// Topology dashboard hidden for now (UI not ready for display).
+// import { TopologyDashboard } from '@/components/topology/TopologyDashboard';
 import { useTranslation } from '@/i18n';
 import { initialState } from '@/state/reducer';
 import { BTN_TOOLBAR_TEXT } from '@/components/ui/button';
@@ -55,7 +56,8 @@ function clusterLoadedPage(yaml: string, label: string): PageData | undefined {
 function App() {
   const [splitPercent, setSplitPercent] = useState(60);
   const [clusterOpen, setClusterOpen] = useState(false);
-  const [topoOpen, setTopoOpen] = useState(false);
+  // Topology dashboard hidden for now.
+  // const [topoOpen, setTopoOpen] = useState(false);
   const [authState, setAuthState] = useState<AuthMe | 'checking' | null>('checking');
   const [userAdminOpen, setUserAdminOpen] = useState(false);
   const [pages, setPages] = useState<PageData[]>(() => [createPage('Policy 1')]);
@@ -146,9 +148,20 @@ function App() {
     [activeId],
   );
 
-  const handleRenamePage = useCallback((id: string, label: string) => {
-    setPages(prev => prev.map(p => (p.page.id === id ? { ...p, page: { ...p.page, label } } : p)));
-  }, []);
+  // Tab labels mirror the policy's namespace/name so a tab always reads as
+  // the identity of what it edits. Live for the active page (its state
+  // changes land in stateRef on every edit); other pages use their snapshot.
+  const pagesView = useMemo(() => {
+    const labelOf = (state: EditorState) =>
+      `${state.policy.namespace}/${state.policy.name}`;
+    return pages.map(p =>
+      p.page.id === activeId && stateRef.current[p.page.id]
+        ? { ...p.page, label: labelOf(stateRef.current[p.page.id]!) }
+        : p.state
+          ? { ...p.page, label: labelOf(p.state) }
+          : p.page,
+    );
+  }, [pages, activeId]);
 
   // Identity-stable view of the open pages for the cluster panel's
   // "open in N tabs" note — recomputed only when pages actually change,
@@ -191,22 +204,15 @@ function App() {
       {/* Page tabs */}
       <div className="flex items-center justify-between bg-surface border-b border-divider">
         <PolicyPageBar
-          pages={pages.map(p => p.page)}
+          pages={pagesView}
           activeId={activeId}
           onSelect={handleSelectPage}
           onAdd={handleAddPage}
           onRemove={handleRemovePage}
-          onRename={handleRenamePage}
+
         />
         <div className="flex items-center gap-1 pr-2">
-          <button
-            className={BTN_TOOLBAR_TEXT}
-            onClick={() => setTopoOpen(true)}
-            aria-label={t('topo-title')}
-            title={t('topo-title')}
-          >
-            <Map size={14} />
-          </button>
+          {/* Topology dashboard button hidden for now. */}
           <button
             className={BTN_TOOLBAR_TEXT}
             onClick={() => setClusterOpen(o => !o)}
@@ -277,16 +283,7 @@ function App() {
         </PolicyProvider>
       </div>
       {userAdminOpen && <UserAdminPanel onClose={() => setUserAdminOpen(false)} />}
-      {topoOpen && (
-        <TopologyDashboard
-          onClose={() => setTopoOpen(false)}
-          onLoadPolicy={handleLoadFromCluster}
-          onStartAuthoring={() => {
-            setTopoOpen(false);
-            handleAddPage();
-          }}
-        />
-      )}
+      {/* Topology dashboard hidden for now. */}
     </div>
   );
 }
